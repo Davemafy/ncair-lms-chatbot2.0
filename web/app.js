@@ -5,6 +5,21 @@ const welcome = document.querySelector('#welcome');
 const conversation = document.querySelector('#conversation');
 const send = document.querySelector('#sendBtn');
 
+const previewKnowledge = [
+  { test: /attendance|75%|miss class/i, answer: 'You need at least **75% attendance** to pass each cohort. Passing the assessments does not override the attendance requirement; attendance below 75% means retaking that cohort.' },
+  { test: /course|curriculum|learn|pathway|cohort/i, answer: 'The course pathway is **Python Beginners → Python Advanced → Data Science Beginners → Data Science Advanced → Product Design Beginners → Product Design Advanced → Product Development → Embedded Systems**.' },
+  { test: /logbook|siwes/i, answer: 'SIWES interns must physically present their logbooks for signing at NCAIR Headquarters **every two weeks**.' },
+  { test: /location|address|where.*ncair/i, answer: 'NCAIR is at **Plot 790, Alimoh-Abu Street, behind VIO Yard, Wuye District, Abuja**. Physical onboarding takes place at the 50-Seater Hall in the e-Government Building.' },
+  { test: /password|email|invitation|spam|locked|upload|document/i, answer: 'Check Spam, Junk or Trash for a missing invitation. Passwords need at least 8 characters with one letter and number. Uploads must be PDF or PNG and under 2 MB.' },
+  { test: /sign.?in|login|lms|portal|open/i, answer: '[Open the NCAIR LMS sign-in page](https://lms.ncair.nitda.gov.ng/intern/signin).' },
+  { test: /start|new|onboard|register|step/i, answer: 'New interns complete registration physically with facilitators in the PSIN 50-Seater Hall after orientation. Registration closes at **5:00 PM** on the registration day.' },
+];
+
+function previewAnswer(text) {
+  const match = previewKnowledge.find(item => item.test.test(text));
+  return match?.answer || 'I could not find enough information in the current official guide. Please confirm this with your NCAIR facilitator.';
+}
+
 function scrollDown() { requestAnimationFrame(() => conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' })); }
 function escapeHtml(value) { return value.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]); }
 function renderMarkdown(value) {
@@ -25,11 +40,14 @@ async function ask(text) {
   const typing = message('assistant', '<div class="typing"><span></span><span></span><span></span></div>');
   try {
     const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) throw new Error('BACKEND_UNAVAILABLE');
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || 'The assistant could not respond.');
     typing.querySelector('.bubble').innerHTML = `<p>${renderMarkdown(result.answer)}</p><span class="source-chip">${escapeHtml(result.tool)}</span>`;
   } catch (error) {
-    typing.querySelector('.bubble').innerHTML = `<p>${escapeHtml(error.message)}</p><span class="source-chip">Service unavailable</span>`;
+    const answer = previewAnswer(text);
+    typing.querySelector('.bubble').innerHTML = `<p>${renderMarkdown(answer)}</p><span class="source-chip">Official guide · preview mode</span>`;
   } finally { send.disabled = false; prompt.focus(); scrollDown(); }
 }
 form.addEventListener('submit', event => { event.preventDefault(); ask(prompt.value); });
