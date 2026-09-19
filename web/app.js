@@ -36,7 +36,7 @@ function message(role, html) {
 }
 async function ask(text) {
   if (!text.trim()) return;
-  welcome.hidden = true; message('user', escapeHtml(text)); prompt.value = ''; prompt.style.height = 'auto'; send.disabled = true;
+  welcome.hidden = true; message('user', escapeHtml(text)); prompt.value = ''; prompt.style.height = 'auto'; prompt.style.overflowY = 'hidden'; send.disabled = true;
   const typing = message('assistant', '<div class="typing"><span></span><span></span><span></span></div>');
   try {
     const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
@@ -52,7 +52,12 @@ async function ask(text) {
 }
 form.addEventListener('submit', event => { event.preventDefault(); ask(prompt.value); });
 prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); } });
-prompt.addEventListener('input', () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 120)}px`; });
+prompt.addEventListener('input', () => {
+  prompt.style.height = 'auto';
+  const height = Math.min(prompt.scrollHeight, 120);
+  prompt.style.height = `${height}px`;
+  prompt.style.overflowY = prompt.scrollHeight > 120 ? 'auto' : 'hidden';
+});
 document.querySelectorAll('.suggestion').forEach(button => button.addEventListener('click', () => ask(button.dataset.prompt)));
 document.querySelector('#newChat').addEventListener('click', () => { messages.innerHTML = ''; welcome.hidden = false; prompt.value = ''; closeMenu(); });
 const sidebar = document.querySelector('#sidebar'); const scrim = document.querySelector('#scrim');
