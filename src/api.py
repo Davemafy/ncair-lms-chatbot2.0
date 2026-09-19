@@ -36,6 +36,16 @@ async def chat(request: ChatRequest):
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
 
+@app.get("/styles.css")
+async def stylesheet():
+    return FileResponse(WEB_DIR / "styles.css", media_type="text/css")
+
+
+@app.get("/app.js")
+async def javascript():
+    return FileResponse(WEB_DIR / "app.js", media_type="application/javascript")
+
+
 @app.get("/{full_path:path}")
 async def frontend(full_path: str):
     return FileResponse(WEB_DIR / "index.html")
