@@ -4,6 +4,7 @@ const messages = document.querySelector('#messages');
 const welcome = document.querySelector('#welcome');
 const conversation = document.querySelector('#conversation');
 const send = document.querySelector('#sendBtn');
+const apiBaseUrl = String(window.NCAIR_API_URL || '').replace(/\/+$/, '');
 
 const previewKnowledge = [
   { test: /attendance|75%|miss class/i, answer: 'You need at least **75% attendance** to pass each cohort. Passing the assessments does not override the attendance requirement; attendance below 75% means retaking that cohort.' },
@@ -39,7 +40,7 @@ async function ask(text) {
   welcome.hidden = true; message('user', escapeHtml(text)); prompt.value = ''; prompt.style.height = 'auto'; prompt.style.overflowY = 'hidden'; send.disabled = true;
   const typing = message('assistant', '<div class="typing"><span></span><span></span><span></span></div>');
   try {
-    const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+    const response = await fetch(`${apiBaseUrl}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) throw new Error('BACKEND_UNAVAILABLE');
     const result = await response.json();

@@ -46,6 +46,11 @@ async def javascript():
     return FileResponse(WEB_DIR / "app.js", media_type="application/javascript")
 
 
+@app.get("/config.js")
+async def frontend_config():
+    return FileResponse(WEB_DIR / "config.js", media_type="application/javascript")
+
+
 @app.get("/{full_path:path}")
 async def frontend(full_path: str):
     return FileResponse(WEB_DIR / "index.html")

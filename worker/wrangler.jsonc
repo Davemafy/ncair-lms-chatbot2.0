@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ncair-lms-chatbot-api",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-09-19",
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://ncair-lms-chatbotv1.vercel.app,http://localhost:8000,http://localhost:4173"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
