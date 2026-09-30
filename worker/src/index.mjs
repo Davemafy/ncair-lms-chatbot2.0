@@ -1,4 +1,8 @@
-import { getPortalLink, getStepGuidance, searchKnowledgeBase } from "./knowledge.mjs";
+import {
+  getPortalLink,
+  getStepGuidance,
+  searchNcairKnowledgeBase,
+} from "./knowledge.mjs";
 
 export const MODEL = "@cf/zai-org/glm-4.7-flash";
 
@@ -7,13 +11,23 @@ const TOOLS = [
     type: "function",
     function: {
       name: "get_portal_link",
-      description: "Return a verified NCAIR or LMS URL. Use for requests to open, find or access a portal page.",
+      description: "Return a verified NCAIR or LMS URL.",
       parameters: {
         type: "object",
         properties: {
           action: {
             type: "string",
-            enum: ["main", "login", "profile", "courses", "support"],
+            enum: [
+              "main",
+              "login",
+              "signin",
+              "ncair_home",
+              "register",
+              "profile",
+              "courses",
+              "track_selection",
+              "support",
+            ],
           },
         },
         required: ["action"],
@@ -25,16 +39,11 @@ const TOOLS = [
     type: "function",
     function: {
       name: "get_step_guidance",
-      description: "Explain the full onboarding process or one numbered onboarding step.",
+      description: "Explain one numbered onboarding step.",
       parameters: {
         type: "object",
         properties: {
-          step: {
-            type: "integer",
-            minimum: 0,
-            maximum: 4,
-            description: "Use 0 for the full sequence, otherwise a step from 1 to 4.",
-          },
+          step: { type: "integer", minimum: 1, maximum: 4 },
         },
         required: ["step"],
         additionalProperties: false,
@@ -44,8 +53,8 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "search_knowledge_base",
-      description: "Search the official NCAIR onboarding guide for policies, courses, attendance, SIWES, NYSC, registration and troubleshooting.",
+      name: "search_ncair_knowledge_base",
+      description: "Search the official NCAIR onboarding guide.",
       parameters: {
         type: "object",
         properties: {
@@ -110,30 +119,48 @@ function readToolCall(result) {
 }
 
 function validateToolCall(call, userMessage) {
-  if (!call) return { name: "search_knowledge_base", args: { query: userMessage }, routing: "safe_fallback" };
+  const fallback = {
+    name: "search_ncair_knowledge_base",
+    args: { query: userMessage },
+    routing: "safe_fallback",
+  };
+  if (!call) return fallback;
 
   if (
-    call.name === "get_portal_link" &&
-    ["main", "login", "profile", "courses", "support"].includes(call.args.action)
+    call.name === "get_portal_link"
+    && Object.hasOwn(
+      {
+        main: true,
+        login: true,
+        signin: true,
+        ncair_home: true,
+        register: true,
+        profile: true,
+        courses: true,
+        track_selection: true,
+        support: true,
+      },
+      call.args.action,
+    )
   ) {
     return { ...call, routing: "workers_ai" };
   }
 
   if (
-    call.name === "get_step_guidance" &&
-    Number.isInteger(Number(call.args.step)) &&
-    Number(call.args.step) >= 0 &&
-    Number(call.args.step) <= 4
+    call.name === "get_step_guidance"
+    && Number.isInteger(Number(call.args.step))
+    && Number(call.args.step) >= 1
+    && Number(call.args.step) <= 4
   ) {
     return { name: call.name, args: { step: Number(call.args.step) }, routing: "workers_ai" };
   }
 
-  if (call.name === "search_knowledge_base" && typeof call.args.query === "string") {
+  if (call.name === "search_ncair_knowledge_base" && typeof call.args.query === "string") {
     const query = call.args.query.trim().slice(0, 500);
     if (query) return { name: call.name, args: { query }, routing: "workers_ai" };
   }
 
-  return { name: "search_knowledge_base", args: { query: userMessage }, routing: "safe_fallback" };
+  return fallback;
 }
 
 async function selectTool(ai, userMessage) {
@@ -142,7 +169,7 @@ async function selectTool(ai, userMessage) {
       {
         role: "system",
         content:
-          "You route questions for the NCAIR LMS assistant. Always call exactly one provided tool. Never answer directly. Use search_knowledge_base for any factual policy or programme question.",
+          "You route questions for the legacy NCAIR LMS Worker demo. Always call exactly one provided tool. Never answer directly.",
       },
       { role: "user", content: userMessage },
     ],
@@ -161,7 +188,7 @@ async function answerFromEvidence(ai, userMessage, evidence) {
       {
         role: "system",
         content:
-          "You are the NCAIR LMS Assistant. Answer concisely using only the supplied official evidence. Do not invent dates, URLs, contacts or rules. If the evidence says it is insufficient, say you could not verify the answer and ask the intern to confirm with a facilitator.",
+          "Answer concisely using only the supplied official evidence. Do not invent dates, URLs, contacts or rules.",
       },
       {
         role: "user",
@@ -193,7 +220,7 @@ async function runChat(env, userMessage) {
     return { ...result, tool: selection.name, routing: selection.routing, model: MODEL };
   }
 
-  const result = searchKnowledgeBase(selection.args.query);
+  const result = searchNcairKnowledgeBase(selection.args.query);
   const answer = await answerFromEvidence(env.AI, userMessage, result.evidence);
   return {
     answer,
@@ -209,12 +236,18 @@ export async function handleRequest(request, env) {
   const cors = corsHeaders(origin);
 
   if (request.method === "OPTIONS") {
-    return origin ? new Response(null, { status: 204, headers: cors }) : json({ detail: "Origin not allowed." }, 403, cors);
+    return origin
+      ? new Response(null, { status: 204, headers: cors })
+      : json({ detail: "Origin not allowed." }, 403, cors);
   }
 
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/api/health") {
-    return json({ status: "ok", backend: "cloudflare-workers-ai", model: MODEL }, 200, cors);
+    return json(
+      { status: "ok", backend: "cloudflare-workers-ai-legacy", model: MODEL },
+      200,
+      cors,
+    );
   }
 
   if (request.method !== "POST" || url.pathname !== "/api/chat") {

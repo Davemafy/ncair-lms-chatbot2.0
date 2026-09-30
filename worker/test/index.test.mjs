@@ -2,29 +2,34 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { handleRequest } from "../src/index.mjs";
-import { getPortalLink, getStepGuidance, searchKnowledgeBase } from "../src/knowledge.mjs";
+import {
+  getPortalLink,
+  getStepGuidance,
+  searchNcairKnowledgeBase,
+} from "../src/knowledge.mjs";
 
 const origin = "https://ncair-lms-chatbotv1.vercel.app";
 const envBase = { ALLOWED_ORIGINS: origin };
 
 test("knowledge search returns the attendance rule", () => {
-  const result = searchKnowledgeBase("Can I pass with less than 75% attendance?");
+  const result = searchNcairKnowledgeBase("Can I pass with less than 75% attendance?");
   assert.match(result.evidence, /75% attendance/);
   assert.match(result.evidence, /automatic retake/);
 });
 
 test("deterministic tools preserve verified URLs and onboarding guidance", () => {
-  assert.match(getPortalLink("login").answer, /intern\/signin/);
+  assert.match(getPortalLink("signin").answer, /intern\/signin/);
+  assert.match(getPortalLink("track_selection").answer, /intern\/courses/);
   assert.match(getStepGuidance(2).answer, /PSIN 50-Seater Hall/);
 });
 
-test("health endpoint reports the Cloudflare backend", async () => {
+test("health endpoint clearly reports the legacy Cloudflare backend", async () => {
   const response = await handleRequest(
     new Request("https://worker.example/api/health", { headers: { origin } }),
     envBase,
   );
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).backend, "cloudflare-workers-ai");
+  assert.equal((await response.json()).backend, "cloudflare-workers-ai-legacy");
 });
 
 test("structured tool selection executes portal tool", async () => {
@@ -77,7 +82,7 @@ test("knowledge tool grounds the final Workers AI answer", async () => {
                   id: "call_2",
                   type: "function",
                   function: {
-                    name: "search_knowledge_base",
+                    name: "search_ncair_knowledge_base",
                     arguments: '{"query":"attendance requirement"}',
                   },
                 }],
@@ -105,7 +110,7 @@ test("knowledge tool grounds the final Workers AI answer", async () => {
     env,
   );
   const body = await response.json();
-  assert.equal(body.tool, "search_knowledge_base");
+  assert.equal(body.tool, "search_ncair_knowledge_base");
   assert.match(body.answer, /75% attendance/);
   assert.match(body.evidence, /Attendance and grading/);
 });

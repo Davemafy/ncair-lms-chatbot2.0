@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ncair-lms-chatbot"
+version = "2.0.0"
+description = "Multilingual NCAIR LMS assistant comparing keyword V1 routing with N-ATLaS V2 routing"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0",
+  "pydantic>=2.7.0",
+  "python-dotenv>=1.0.0",
+  "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+runtime = [
+  "accelerate>=1.0.0",
+  "faiss-cpu>=1.7.4",
+  "pdf2image>=1.17.0",
+  "pytesseract>=0.3.10",
+  "sentence-transformers>=3.0.0",
+  "torch>=2.2.0",
+  "transformers>=4.45.0",
+  "uvicorn[standard]>=0.35.0",
+]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "integration: requires external model assets or runtime services",
+]
