@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.request import urlretrieve
 
-import gradio as gr
 import spaces
+import gradio as gr
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
