@@ -47,7 +47,7 @@ class Settings:
     default_version: str
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         repository_root = Path(__file__).resolve().parents[2]
         default_version = os.getenv("NCAIR_DEFAULT_VERSION", "v2").strip().lower()
         if default_version not in {"v1", "v2"}:

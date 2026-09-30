@@ -4,7 +4,6 @@ import json
 from collections import Counter
 from pathlib import Path
 
-
 BENCHMARK_PATH = Path(__file__).with_name("benchmark.jsonl")
 EXPECTED_LANGUAGES = {"english": 15, "hausa": 15, "yoruba": 15, "igbo": 15}
 EXPECTED_CATEGORIES = {

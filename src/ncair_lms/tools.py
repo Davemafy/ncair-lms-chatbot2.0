@@ -11,7 +11,6 @@ from .models import (
 )
 from .rag import KnowledgeBase
 
-
 PORTAL_URLS: dict[PortalAction, str] = {
     PortalAction.MAIN: "https://lms.ncair.nitda.gov.ng",
     PortalAction.LOGIN: "https://lms.ncair.nitda.gov.ng/intern/signin",

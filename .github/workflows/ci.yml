@@ -16,7 +16,6 @@ jobs:
           cache: "pip"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
-      - run: ruff check --unsafe-fixes --fix --diff . || true
       - run: ruff check .
       - run: ruff format --check .
       - run: python -m eval.validate_benchmark

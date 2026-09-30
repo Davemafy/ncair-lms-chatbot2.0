@@ -8,7 +8,6 @@ from pathlib import Path
 from .errors import RetrievalError
 from .models import EvidencePassage, RetrievedEvidence
 
-
 LOGGER = logging.getLogger(__name__)
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHUNK_SIZE = 800

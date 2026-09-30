@@ -10,7 +10,6 @@ from .config import Settings
 from .errors import InvalidModelOutputError, ModelUnavailableError
 from .models import Language, PortalAction, RoutingDecision, RoutingStatus, ToolName
 
-
 LOGGER = logging.getLogger(__name__)
 
 ROUTER_SYSTEM_PROMPT = """You are the semantic router for the NCAIR LMS assistant.

@@ -6,7 +6,6 @@ from ncair_lms.service import AssistantService
 from ncair_lms.tools import get_portal_link as _get_portal_link
 from ncair_lms.tools import get_step_guidance as _get_step_guidance
 
-
 SETTINGS = Settings.from_env()
 OLLAMA_BASE_URL = SETTINGS.ollama_base_url
 OLLAMA_MODEL = SETTINGS.ollama_model

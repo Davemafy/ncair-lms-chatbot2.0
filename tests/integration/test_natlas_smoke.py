@@ -6,7 +6,6 @@ from ncair_lms.config import Settings
 from ncair_lms.models import ToolName
 from ncair_lms.natlas import LocalNatlasClient, NatlasRouter
 
-
 pytestmark = pytest.mark.integration
 
 

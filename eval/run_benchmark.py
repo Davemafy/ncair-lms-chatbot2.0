@@ -12,7 +12,6 @@ from ncair_lms.service import AssistantService
 from .metrics import summarize
 from .validate_benchmark import load_records, validate_records
 
-
 RESULTS_DIR = Path(__file__).with_name("results")
 
 

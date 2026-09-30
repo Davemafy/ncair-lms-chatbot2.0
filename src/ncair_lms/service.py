@@ -12,7 +12,6 @@ from .rag import KnowledgeBase
 from .tools import execute_tool
 from .v1_router import V1KeywordRouter
 
-
 LOGGER = logging.getLogger(__name__)
 
 UNSUPPORTED_MESSAGES = {

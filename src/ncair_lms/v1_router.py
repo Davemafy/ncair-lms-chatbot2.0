@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from .models import Language, PortalAction, RoutingDecision, RoutingStatus, ToolName
 
-
 PORTAL_HINTS = ("link", "url", "where to", "open", "page", "access", "portal")
 
 

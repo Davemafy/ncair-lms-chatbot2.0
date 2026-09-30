@@ -1,26 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from .errors import InvalidToolArgumentsError
 
 
-class Language(str, Enum):
+class Language(StrEnum):
     ENGLISH = "english"
     HAUSA = "hausa"
     YORUBA = "yoruba"
     IGBO = "igbo"
 
 
-class ToolName(str, Enum):
+class ToolName(StrEnum):
     PORTAL_LINK = "get_portal_link"
     STEP_GUIDANCE = "get_step_guidance"
     KNOWLEDGE = "search_ncair_knowledge_base"
 
 
-class PortalAction(str, Enum):
+class PortalAction(StrEnum):
     MAIN = "main"
     LOGIN = "login"
     SIGNIN = "signin"
@@ -32,7 +32,7 @@ class PortalAction(str, Enum):
     SUPPORT = "support"
 
 
-class RoutingStatus(str, Enum):
+class RoutingStatus(StrEnum):
     MODEL = "model"
     KEYWORD_BASELINE = "keyword_baseline"
 
@@ -46,7 +46,7 @@ class RoutingDecision:
     retrieval_query: str | None = None
     status: RoutingStatus = RoutingStatus.MODEL
 
-    def validate(self, *, allow_full_step_sequence: bool = False) -> "RoutingDecision":
+    def validate(self, *, allow_full_step_sequence: bool = False) -> RoutingDecision:
         if self.tool is ToolName.PORTAL_LINK:
             if self.action is None:
                 raise InvalidToolArgumentsError("get_portal_link requires an action.")
