@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .errors import ConfigurationError
 
 
@@ -49,6 +51,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         repository_root = Path(__file__).resolve().parents[2]
+        load_dotenv(repository_root / ".env")
         default_version = os.getenv("NCAIR_DEFAULT_VERSION", "v2").strip().lower()
         if default_version not in {"v1", "v2"}:
             raise ConfigurationError("NCAIR_DEFAULT_VERSION must be either 'v1' or 'v2'.")

@@ -16,9 +16,7 @@ class FakeClient:
 
 def test_natlas_router_accepts_multilingual_structured_decision():
     router = NatlasRouter(
-        FakeClient(
-            '{"language":"hausa","tool":"get_portal_link","arguments":{"action":"login"}}'
-        ),
+        FakeClient('{"language":"hausa","tool":"get_portal_link","arguments":{"action":"login"}}'),
     )
     decision = router.route("Ina zan shiga LMS?")
     assert decision.language is Language.HAUSA

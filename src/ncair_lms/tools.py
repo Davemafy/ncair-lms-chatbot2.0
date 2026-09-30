@@ -36,9 +36,7 @@ PORTAL_LABELS: dict[PortalAction, str] = {
 }
 
 STEP_GUIDANCE: dict[int, str] = {
-    1: (
-        "Step 1 — Attend orientation: new interns begin with the physical orientation at NCAIR."
-    ),
+    1: ("Step 1 — Attend orientation: new interns begin with the physical orientation at NCAIR."),
     2: (
         "Step 2 — Register physically: complete registration with facilitators in the "
         "PSIN 50-Seater Hall."

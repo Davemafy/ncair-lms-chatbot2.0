@@ -6,7 +6,7 @@ install:
 	$(PYTHON) -m pip install -e ".[runtime]"
 
 install-dev:
-	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) -m pip install -e ".[runtime,dev]"
 
 test:
 	$(PYTHON) -m pytest tests/unit

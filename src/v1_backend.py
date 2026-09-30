@@ -28,8 +28,12 @@ def get_step_guidance(step_number: int) -> str:
 
 
 def agentic_rag_orchestrator(user_query: str) -> dict:
-    return AssistantService(
-        "v1",
-        settings=SETTINGS,
-        knowledge_base=_KNOWLEDGE_BASE,
-    ).chat(user_query).as_dict()
+    return (
+        AssistantService(
+            "v1",
+            settings=SETTINGS,
+            knowledge_base=_KNOWLEDGE_BASE,
+        )
+        .chat(user_query)
+        .as_dict()
+    )

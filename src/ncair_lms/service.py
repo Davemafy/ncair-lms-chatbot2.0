@@ -35,13 +35,11 @@ UNSUPPORTED_MESSAGES = {
 
 
 class Router(Protocol):
-    def route(self, question: str) -> RoutingDecision:
-        ...
+    def route(self, question: str) -> RoutingDecision: ...
 
 
 class GroundedAnswerer(Protocol):
-    def answer(self, *, question: str, language: Language, evidence: str) -> str:
-        ...
+    def answer(self, *, question: str, language: Language, evidence: str) -> str: ...
 
 
 class OllamaAnswerer:

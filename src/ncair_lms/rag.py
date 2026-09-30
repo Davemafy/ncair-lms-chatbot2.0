@@ -72,8 +72,7 @@ class KnowledgeBase:
         for text_path in sorted(self._data_dir.glob("*.txt")):
             text = text_path.read_text(encoding="utf-8")
             chunks.extend(
-                _Chunk(source=text_path.name, page=None, text=chunk)
-                for chunk in _chunk_text(text)
+                _Chunk(source=text_path.name, page=None, text=chunk) for chunk in _chunk_text(text)
             )
 
         pdf_paths = sorted(self._data_dir.glob("*.pdf"))

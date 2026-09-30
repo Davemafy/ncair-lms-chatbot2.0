@@ -46,8 +46,7 @@ Rules:
 
 
 class NatlasTextClient(Protocol):
-    def generate(self, messages: Sequence[dict[str, str]], *, max_new_tokens: int) -> str:
-        ...
+    def generate(self, messages: Sequence[dict[str, str]], *, max_new_tokens: int) -> str: ...
 
 
 class LocalNatlasClient:

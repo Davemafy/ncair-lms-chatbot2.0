@@ -54,18 +54,18 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 python -m pip install --upgrade pip
-make install
+make install-dev
 ```
 
 Without `make`:
 
 ```bash
-python -m pip install -e ".[runtime]"
+python -m pip install -e ".[runtime,dev]"
 ```
 
 ## Configuration
 
-`.env.example` documents every runtime setting. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` minimum retrieval similarity, and the original Ollama V1 model. `HF_TOKEN` has no default secret value and is optional for public model access.
+`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` minimum retrieval similarity, and the original Ollama V1 model. `HF_TOKEN` has no default secret value and is optional for public model access.
 
 Environment files are never committed.
 
