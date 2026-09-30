@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+COPY pyproject.toml requirements.txt ./
 COPY src ./src
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-deps .
+
 COPY data ./data
 COPY web ./web
 
-CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn ncair_lms.api:app --host 0.0.0.0 --port ${PORT}"]

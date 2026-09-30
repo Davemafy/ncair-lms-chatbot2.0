@@ -1,11 +1,17 @@
 export const PORTAL_URLS = {
   main: "https://lms.ncair.nitda.gov.ng",
   login: "https://lms.ncair.nitda.gov.ng/intern/signin",
+  signin: "https://lms.ncair.nitda.gov.ng/intern/signin",
+  ncair_home: "https://ncair.nitda.gov.ng/",
+  register: "https://lms.ncair.nitda.gov.ng",
   profile: "https://lms.ncair.nitda.gov.ng/intern/profile",
   courses: "https://lms.ncair.nitda.gov.ng/intern/courses",
+  track_selection: "https://lms.ncair.nitda.gov.ng/intern/courses",
   support: "https://ncair.nitda.gov.ng/contact/",
 };
 
+// This is a deployment snapshot for the legacy Cloudflare demo runtime.
+// The assessed Python V2 uses data/ + FAISS as its source of truth.
 const KNOWLEDGE = [
   {
     source: "Official guide · NCAIR location",
@@ -52,7 +58,7 @@ function tokens(value) {
     .filter((token) => token.length > 1 && !STOP_WORDS.has(token));
 }
 
-export function searchKnowledgeBase(query, limit = 3) {
+export function searchNcairKnowledgeBase(query, limit = 3) {
   const queryTokens = new Set(tokens(query));
   const ranked = KNOWLEDGE.map((entry) => {
     const keywordMatches = entry.keywords.filter((keyword) => queryTokens.has(keyword)).length;
@@ -82,8 +88,12 @@ export function getPortalLink(action) {
   const labels = {
     main: "NCAIR LMS",
     login: "NCAIR LMS sign-in page",
+    signin: "NCAIR LMS sign-in page",
+    ncair_home: "NCAIR website",
+    register: "NCAIR LMS registration page",
     profile: "intern profile page",
     courses: "courses page",
+    track_selection: "track selection page",
     support: "NCAIR support page",
   };
   return {
@@ -100,11 +110,8 @@ export function getStepGuidance(step) {
     4: "**Step 4 — Begin your assigned courses:** Confirm your cohort and course selection in the LMS. Registration closes at 5:00 PM on registration day.",
   };
   const numericStep = Number(step);
-  if (steps[numericStep]) {
-    return { answer: steps[numericStep], evidence: "Official NCAIR onboarding sequence" };
+  if (!steps[numericStep]) {
+    throw new Error("Step must be between 1 and 4.");
   }
-  return {
-    answer: Object.values(steps).join("\n\n"),
-    evidence: "Official NCAIR onboarding sequence",
-  };
+  return { answer: steps[numericStep], evidence: "Official NCAIR onboarding sequence" };
 }
