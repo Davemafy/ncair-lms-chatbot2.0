@@ -1,0 +1,8 @@
+gradio>=5.0.0
+spaces
+torch>=2.8.0
+transformers>=4.45.0
+accelerate>=1.0.0
+faiss-cpu>=1.7.4
+sentence-transformers>=3.0.0
+ncair-lms-chatbot @ https://github.com/Davemafy/ncair-lms-chatbot2.0/archive/c1e4f33850a1b225ab8afa8fade48fa641a9f856.zip
