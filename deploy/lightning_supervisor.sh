@@ -117,7 +117,7 @@ start_server() {
 }
 
 warmup_v2() {
-  log "Warming N-ATLaS + FAISS with a Hausa end-to-end request"
+  log "Warming N-ATLaS + FAISS with a Hausa factual request"
 
   python - "$PORT" <<'PY'
 import json
@@ -125,7 +125,7 @@ import sys
 import urllib.request
 
 port = sys.argv[1]
-payload = json.dumps({"message": "Ina sabo a nan. Ta yaya zan fara?"}).encode()
+payload = json.dumps({"message": "A ina ofishin NCAIR yake a Abuja?"}).encode()
 request = urllib.request.Request(
     f"http://127.0.0.1:{port}/api/v2/chat",
     data=payload,
@@ -142,6 +142,8 @@ if body.get("tool") != "search_ncair_knowledge_base":
     raise SystemExit(f"warmup tool mismatch: {body.get('tool')!r}")
 if not body.get("answer"):
     raise SystemExit("warmup returned an empty answer")
+if not body.get("sources"):
+    raise SystemExit("warmup returned no official evidence sources")
 
 print("warmup ok")
 PY
@@ -163,6 +165,9 @@ deploy_sha() {
 
   if ! install_runtime || ! start_server || ! warmup_v2; then
     log "Deployment failed for $target"
+    if [[ -s "$SERVER_LOG" ]]; then
+      cp "$SERVER_LOG" "$STATE_DIR/server-$target.failed.log" || true
+    fi
     echo "$target" >"$FAILED_SHA_FILE"
     date +%s >"$FAILED_AT_FILE"
     stop_server
