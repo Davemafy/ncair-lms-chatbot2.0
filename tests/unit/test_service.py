@@ -43,9 +43,11 @@ class FakeVerifier:
     def __init__(self, supported=True):
         self.supported = supported
         self.calls = 0
+        self.questions = []
 
     def is_supported(self, *, question, evidence):
         self.calls += 1
+        self.questions.append(question)
         assert question
         assert evidence
         return self.supported
@@ -85,6 +87,7 @@ def test_v2_service_keeps_language_and_grounding(tmp_path):
     assert response.sources == ("guide.txt",)
     assert "75%" in response.answer
     assert verifier.calls == 1
+    assert verifier.questions == ["attendance requirement"]
     assert answerer.calls == 1
 
 
@@ -107,4 +110,5 @@ def test_v2_service_rejects_retrieval_that_does_not_answer_question(tmp_path):
     assert response.sources == ()
     assert "Ban sami isasshen bayani" in response.answer
     assert verifier.calls == 1
+    assert verifier.questions == ["attendance requirement"]
     assert answerer.calls == 0
