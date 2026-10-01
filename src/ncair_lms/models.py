@@ -83,9 +83,12 @@ class EvidencePassage:
 @dataclass(frozen=True)
 class RetrievedEvidence:
     passages: tuple[EvidencePassage, ...] = ()
+    support_verified: bool | None = None
 
     @property
     def supported(self) -> bool:
+        if self.support_verified is not None:
+            return self.support_verified
         return bool(self.passages)
 
     @property
