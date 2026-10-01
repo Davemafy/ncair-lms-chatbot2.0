@@ -73,6 +73,48 @@ def test_natlas_router_accepts_flat_tool_call_shape():
     assert len(client.calls) == 2
 
 
+def test_natlas_router_accepts_tool_name_as_top_level_key():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"get_step_guidance":{"step":2}}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("Show me step 2.")
+
+    assert decision.tool is ToolName.STEP_GUIDANCE
+    assert decision.step == 2
+    assert len(client.calls) == 2
+
+
+def test_natlas_router_accepts_knowledge_tool_name_as_top_level_key():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"search_ncair_knowledge_base":{"query":"attendance requirement"}}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("What attendance do I need?")
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == "attendance requirement"
+    assert len(client.calls) == 2
+
+
+def test_natlas_router_accepts_portal_action_shorthand():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"action":"courses"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("Open my courses page.")
+
+    assert decision.tool is ToolName.PORTAL_LINK
+    assert decision.action is PortalAction.COURSES
+    assert len(client.calls) == 2
+
+
 def test_natlas_router_rejects_unknown_flat_action_after_retry():
     client = FakeClient(
         '{"language":"english"}',
