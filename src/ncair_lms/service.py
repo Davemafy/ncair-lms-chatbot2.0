@@ -150,10 +150,17 @@ class AssistantService:
             and result.evidence.passages
         ):
             assert self.verifier is not None
-            verifier_question = question or decision.retrieval_query or ""
+            verifier_question = decision.retrieval_query or question or ""
             supported = self.verifier.is_supported(
                 question=verifier_question,
                 evidence=result.evidence.as_context(),
+            )
+            LOGGER.info(
+                "evidence_verdict version=%s supported=%s passages=%d query=%r",
+                self.version,
+                supported,
+                len(result.evidence.passages),
+                verifier_question,
             )
             result = ToolResult(
                 answer=result.answer,
