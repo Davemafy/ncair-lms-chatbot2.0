@@ -274,16 +274,12 @@ def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
             arguments = payload.get("arguments")
             if arguments is None:
                 arguments = {
-                    key: value
-                    for key, value in payload.items()
-                    if key not in {"tool", "language"}
+                    key: value for key, value in payload.items() if key not in {"tool", "language"}
                 }
         elif "action" in payload and str(payload["action"]) in {tool.value for tool in ToolName}:
             tool = ToolName(str(payload["action"]))
             arguments = {
-                key: value
-                for key, value in payload.items()
-                if key not in {"action", "language"}
+                key: value for key, value in payload.items() if key not in {"action", "language"}
             }
         else:
             raise InvalidModelOutputError(
