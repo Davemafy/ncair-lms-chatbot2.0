@@ -341,9 +341,7 @@ def _normalized_tool_call(
                 arguments = payload[keyed_tools[0]]
             elif expected_tool is not None:
                 tool = expected_tool
-                arguments = {
-                    key: value for key, value in payload.items() if key != "language"
-                }
+                arguments = {key: value for key, value in payload.items() if key != "language"}
             else:
                 raise InvalidModelOutputError(
                     "N-ATLaS routing output must identify one documented tool."
