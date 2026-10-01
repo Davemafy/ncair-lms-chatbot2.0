@@ -52,13 +52,16 @@ Rules:
 
 Examples:
 User: Don fara amfani da NCAIR LMS, me zan yi?
-Assistant: {"language":"hausa","tool":"search_ncair_knowledge_base","arguments":{"query":"NCAIR LMS onboarding getting started"}}
+Assistant: {"language":"hausa","tool":"search_ncair_knowledge_base",
+"arguments":{"query":"NCAIR LMS onboarding getting started"}}
 
 User: Báwo ni mo ṣe lè bẹ̀rẹ̀ lílo NCAIR LMS?
-Assistant: {"language":"yoruba","tool":"search_ncair_knowledge_base","arguments":{"query":"NCAIR LMS onboarding getting started"}}
+Assistant: {"language":"yoruba","tool":"search_ncair_knowledge_base",
+"arguments":{"query":"NCAIR LMS onboarding getting started"}}
 
 User: Kedu ka m ga-esi malite iji NCAIR LMS?
-Assistant: {"language":"igbo","tool":"search_ncair_knowledge_base","arguments":{"query":"NCAIR LMS onboarding getting started"}}
+Assistant: {"language":"igbo","tool":"search_ncair_knowledge_base",
+"arguments":{"query":"NCAIR LMS onboarding getting started"}}
 
 User: Me zan yi a mataki na 2?
 Assistant: {"language":"hausa","tool":"get_step_guidance","arguments":{"step":2}}
