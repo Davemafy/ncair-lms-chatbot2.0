@@ -31,7 +31,9 @@ Return exactly one JSON object and no prose.
 
 Allowed tools:
 1. get_portal_link
-   arguments: {"action":"main|login|signin|ncair_home|register|profile|courses|\n   track_selection|support"}
+   arguments: {"action":"<one allowed action>"}
+   allowed actions: main, login, signin, ncair_home, register, profile, courses,
+   track_selection, support
 2. get_step_guidance
    arguments: {"step":1|2|3|4}
 3. search_ncair_knowledge_base
