@@ -58,6 +58,34 @@ def test_natlas_router_separates_language_from_tool_selection():
     assert client.calls[1][0][0]["content"] == TOOL_ROUTER_SYSTEM_PROMPT
 
 
+
+def test_natlas_router_accepts_flat_tool_call_shape():
+    client = FakeClient(
+        '{"language":"hausa"}',
+        '{"action":"search_ncair_knowledge_base","query":"NCAIR office location in Abuja"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("A ina ofishin NCAIR yake a Abuja?")
+
+    assert decision.language is Language.HAUSA
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == "NCAIR office location in Abuja"
+    assert len(client.calls) == 2
+
+
+def test_natlas_router_rejects_unknown_flat_action_after_retry():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"action":"invented_tool","query":"x"}',
+        '{"action":"still_invented","query":"x"}',
+    )
+    router = NatlasRouter(client)
+
+    with pytest.raises(InvalidModelOutputError):
+        router.route("Find this information.")
+
+
 def test_natlas_router_requires_english_retrieval_query_field():
     client = FakeClient(
         '{"language":"yoruba"}',
