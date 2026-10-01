@@ -157,6 +157,40 @@ class LocalNatlasClient:
             raise ModelUnavailableError("N-ATLaS inference failed.") from exc
 
 
+def _close_truncated_json(text: str) -> str | None:
+    """Repair only a JSON object that ends with missing closing braces/brackets."""
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append(char)
+        elif char in "}]":
+            if not stack:
+                return None
+            opener = stack.pop()
+            if (opener, char) not in {("{", "}"), ("[", "]")}:
+                return None
+
+    if in_string or not stack or len(stack) > 2:
+        return None
+
+    closers = {"{": "}", "[": "]"}
+    return text + "".join(closers[opener] for opener in reversed(stack))
+
+
 def _json_object(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
@@ -168,10 +202,18 @@ def _json_object(raw: str) -> dict:
     if start < 0:
         raise InvalidModelOutputError("N-ATLaS did not return a JSON object.")
 
+    candidate = text[start:]
     try:
-        value, _ = json.JSONDecoder().raw_decode(text[start:])
+        value, _ = json.JSONDecoder().raw_decode(candidate)
     except json.JSONDecodeError as exc:
-        raise InvalidModelOutputError("N-ATLaS returned invalid JSON.") from exc
+        repaired = _close_truncated_json(candidate)
+        if repaired is None:
+            raise InvalidModelOutputError("N-ATLaS returned invalid JSON.") from exc
+        try:
+            value, _ = json.JSONDecoder().raw_decode(repaired)
+        except json.JSONDecodeError as repaired_exc:
+            raise InvalidModelOutputError("N-ATLaS returned invalid JSON.") from repaired_exc
+        LOGGER.warning("natlas_repaired_truncated_json raw=%r", candidate[:1000])
 
     if not isinstance(value, dict):
         raise InvalidModelOutputError("N-ATLaS routing output must be a JSON object.")
