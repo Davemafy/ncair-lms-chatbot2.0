@@ -25,7 +25,7 @@ flowchart LR
     J --> K[Answer in user's language]
 ```
 
-V2 keeps N-ATLaS as the assessed model while preserving the direct semantic router that performed best on explicit navigation and numbered-step requests. When that router selects a portal link or numbered step, a separate N-ATLaS sufficiency check asks whether executing that exact action would actually satisfy the user's requested outcome. If not, the request is escalated to knowledge search and N-ATLaS writes a concise English retrieval query for FAISS. Knowledge decisions skip the sufficiency check. Retrieved passages are not treated as support merely because similarity search returned them: N-ATLaS verifies the strongest passage before a grounded response is generated. No benchmark phrases or keyword rules are added to the runtime router.
+V2 keeps N-ATLaS as the assessed model while preserving the direct semantic router that performed best on explicit navigation and numbered-step requests. When that router selects a portal link or numbered step, a separate N-ATLaS sufficiency check asks whether executing that exact action would actually satisfy the user's requested outcome. If not, the request is escalated to knowledge search and N-ATLaS writes a concise English retrieval query for FAISS. Knowledge decisions skip the sufficiency check. Retrieved passages are not treated as support merely because similarity search returned them: N-ATLaS verifies the strongest passage before a grounded response is generated. No benchmark phrases or keyword rules are added to the runtime router. The sufficiency check is conditional, so requests routed directly to knowledge do not pay for an extra decision stage.
 
 ### V1 — comparison baseline
 
