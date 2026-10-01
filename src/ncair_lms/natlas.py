@@ -62,7 +62,8 @@ class LocalNatlasClient:
             return
 
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         except ImportError as exc:
             raise ModelUnavailableError(
                 "N-ATLaS requires transformers, accelerate, and torch. "
@@ -70,10 +71,22 @@ class LocalNatlasClient:
             ) from exc
 
         kwargs = {"device_map": self._settings.natlas_device, "torch_dtype": "auto"}
+        if self._settings.natlas_quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            kwargs["torch_dtype"] = torch.float16
         if self._settings.hf_token:
             kwargs["token"] = self._settings.hf_token
 
-        LOGGER.info("loading_natlas model=%s", self._settings.natlas_model)
+        LOGGER.info(
+            "loading_natlas model=%s quantization=%s",
+            self._settings.natlas_model,
+            self._settings.natlas_quantization,
+        )
         try:
             tokenizer = AutoTokenizer.from_pretrained(
                 self._settings.natlas_model,
