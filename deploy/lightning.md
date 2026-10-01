@@ -29,6 +29,7 @@ Configure these as Studio environment variables/secrets:
 HF_TOKEN=...
 NATLAS_MODEL=NCAIR1/N-ATLaS
 NATLAS_DEVICE=auto
+NATLAS_QUANTIZATION=4bit
 NCAIR_DEFAULT_VERSION=v2
 TOP_K=3
 MIN_RETRIEVAL_SCORE=0.30
@@ -44,9 +45,11 @@ This avoids spending GPU credits on the initial download.
 python deploy/prefetch_models.py
 ```
 
-## 3. Switch the Studio to GPU
+## 3. Switch the Studio to the free T4
 
-Choose the lowest-cost single GPU with at least 24 GB VRAM. L4 24 GB is preferred when available.
+On free accounts without a verified payment method, choose the NVIDIA T4 (16 GB).
+
+The deployment sets `NATLAS_QUANTIZATION=4bit` so the official N-ATLaS weights are loaded with bitsandbytes NF4 quantization and fit within the T4's VRAM. This is still N-ATLaS inference, but it is a quantized runtime rather than the original BF16 representation. Keep that distinction explicit in evaluation and documentation.
 
 Then start the app:
 
