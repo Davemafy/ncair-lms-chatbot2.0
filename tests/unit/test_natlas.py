@@ -58,7 +58,6 @@ def test_natlas_router_separates_language_from_tool_selection():
     assert client.calls[1][0][0]["content"] == TOOL_ROUTER_SYSTEM_PROMPT
 
 
-
 def test_natlas_router_accepts_flat_tool_call_shape():
     client = FakeClient(
         '{"language":"hausa"}',
