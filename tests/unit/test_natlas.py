@@ -103,8 +103,7 @@ def test_natlas_router_rejects_invalid_decision_after_retry():
 def test_natlas_router_repairs_single_missing_closing_brace():
     client = FakeClient(
         '{"language":"hausa"}',
-        '{"tool":"search_ncair_knowledge_base",'
-        '"arguments":{"query":"NCAIR LMS account setup"}',
+        '{"tool":"search_ncair_knowledge_base","arguments":{"query":"NCAIR LMS account setup"}',
     )
     router = NatlasRouter(client)
 
