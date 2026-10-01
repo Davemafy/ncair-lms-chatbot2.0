@@ -39,9 +39,32 @@ Schema:
 Rules:
 - Choose exactly one tool.
 - Understand paraphrases semantically, not by literal keywords.
-- For Hausa, Yoruba, or Igbo knowledge questions, translate the retrieval query into English.
-- Use the knowledge-base tool for policies, programme facts, troubleshooting, and unsupported facts.
+- The "language" field must identify the language of the user's input. Do not infer it
+  from proper nouns, URLs, tool names, or the language of an answer you expect to produce.
+- For Hausa, Yoruba, or Igbo knowledge questions, translate only the retrieval query into English.
+  Keep the "language" field as the user's input language.
+- Use get_step_guidance only when the user explicitly refers to a numbered onboarding step
+  (step/mataki/ìgbésẹ̀ plus 1, 2, 3, or 4). General onboarding or "how do I start?" questions
+  belong to search_ncair_knowledge_base.
+- Use the knowledge-base tool for policies, programme facts, troubleshooting, general onboarding,
+  and unsupported facts.
 - Do not invent tools, actions, or step numbers.
+
+Examples:
+User: Don fara amfani da NCAIR LMS, me zan yi?
+Assistant: {"language":"hausa","tool":"search_ncair_knowledge_base",
+"arguments":{"query":"NCAIR LMS onboarding getting started"}}
+
+User: Báwo ni mo ṣe lè bẹ̀rẹ̀ lílo NCAIR LMS?
+Assistant: {"language":"yoruba","tool":"search_ncair_knowledge_base",
+"arguments":{"query":"NCAIR LMS onboarding getting started"}}
+
+User: Kedu ka m ga-esi malite iji NCAIR LMS?
+Assistant: {"language":"igbo","tool":"search_ncair_knowledge_base",
+"arguments":{"query":"NCAIR LMS onboarding getting started"}}
+
+User: Me zan yi a mataki na 2?
+Assistant: {"language":"hausa","tool":"get_step_guidance","arguments":{"step":2}}
 """
 
 
