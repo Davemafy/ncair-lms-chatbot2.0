@@ -1,3 +1,3 @@
-// Set this to the deployed Cloudflare Worker origin, without a trailing slash.
-// Example: window.NCAIR_API_URL = "https://ncair-lms-chatbot-api.example.workers.dev";
-window.NCAIR_API_URL = "https://ncair-lms-chatbot2-0.imafidondavid1.workers.dev";
+// Empty means use the same origin as the deployed FastAPI app.
+// Set this only when the frontend is hosted separately from the API.
+window.NCAIR_API_URL = "";
