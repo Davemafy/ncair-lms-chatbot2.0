@@ -89,7 +89,7 @@ def test_v2_service_keeps_language_and_grounding(tmp_path):
 
     assert response.language is Language.HAUSA
     assert response.tool is ToolName.KNOWLEDGE
-    assert response.sources == ("guide.txt",)
+    assert response.sources == ("guide.txt", "other.txt")
     assert "75%" in response.answer
     assert verifier.calls == 1
     assert verifier.questions == ["attendance requirement"]
