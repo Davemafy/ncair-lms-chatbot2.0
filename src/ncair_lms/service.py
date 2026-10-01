@@ -89,6 +89,7 @@ class AssistantService:
         self.knowledge_base = knowledge_base or KnowledgeBase(
             self.settings.data_dir,
             min_score=self.settings.min_retrieval_score,
+            embedding_device=self.settings.embedding_device,
         )
 
         natlas_client = None
