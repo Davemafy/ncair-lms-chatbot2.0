@@ -19,6 +19,7 @@ cd "$LIVE_DIR"
 git remote set-url origin "$REPO_URL"
 git fetch --quiet origin "$DEPLOY_BRANCH" || true
 
-nohup "$LIVE_DIR/deploy/lightning_supervisor.sh"   >>"$STATE_DIR/supervisor.log" 2>&1 &
+nohup bash "$LIVE_DIR/deploy/lightning_supervisor.sh" \
+  >>"$STATE_DIR/supervisor.log" 2>&1 &
 
 echo "[$(date -Is)] supervisor launch requested pid=$!"
