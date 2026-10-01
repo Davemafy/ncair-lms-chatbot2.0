@@ -264,16 +264,38 @@ class NatlasLanguageDetector:
                 raise retry_error from first_error
 
 
-def _parse_tool_decision(raw: str, *, language: Language) -> RoutingDecision:
+def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
+    """Normalize the two structured tool-call shapes N-ATLaS can emit."""
+    payload = _json_object(raw)
+
     try:
-        payload = _json_object(raw)
-        tool = ToolName(str(payload["tool"]))
-        arguments = payload["arguments"]
-    except (KeyError, TypeError, ValueError) as exc:
-        raise InvalidModelOutputError("N-ATLaS routing output has an invalid schema.") from exc
+        if "tool" in payload:
+            tool = ToolName(str(payload["tool"]))
+            arguments = payload.get("arguments")
+            if arguments is None:
+                arguments = {
+                    key: value for key, value in payload.items() if key not in {"tool", "language"}
+                }
+        elif "action" in payload and str(payload["action"]) in {tool.value for tool in ToolName}:
+            tool = ToolName(str(payload["action"]))
+            arguments = {
+                key: value for key, value in payload.items() if key not in {"action", "language"}
+            }
+        else:
+            raise InvalidModelOutputError(
+                "N-ATLaS routing output must identify one documented tool."
+            )
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelOutputError("N-ATLaS routing output has an invalid tool.") from exc
 
     if not isinstance(arguments, dict):
         raise InvalidModelOutputError("N-ATLaS tool arguments must be an object.")
+
+    return tool, arguments
+
+
+def _parse_tool_decision(raw: str, *, language: Language) -> RoutingDecision:
+    tool, arguments = _normalized_tool_call(raw)
 
     try:
         if tool is ToolName.PORTAL_LINK:
