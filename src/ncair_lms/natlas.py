@@ -7,64 +7,64 @@ from datetime import datetime
 from typing import Protocol
 
 from .config import Settings
-from .errors import InvalidModelOutputError, ModelUnavailableError
+from .errors import InvalidModelOutputError, InvalidToolArgumentsError, ModelUnavailableError
 from .models import Language, PortalAction, RoutingDecision, RoutingStatus, ToolName
 
 LOGGER = logging.getLogger(__name__)
 
-ROUTER_SYSTEM_PROMPT = """You are the semantic router for the NCAIR LMS assistant.
-Return exactly one JSON object and no prose.
+LANGUAGE_SYSTEM_PROMPT = """Classify the user's input language for the NCAIR LMS assistant.
+Return exactly one JSON object and no prose:
 
-Supported languages:
-- english
-- hausa
-- yoruba
-- igbo
+{"language":"english|hausa|yoruba|igbo"}
+
+Rules:
+- Choose exactly one of english, hausa, yoruba, or igbo.
+- Identify the language from the sentence's grammar and function words.
+- Do not let names, URLs, acronyms, course names, or English technical terms determine the label.
+- For code-switched text, choose the language carrying most of the sentence grammar.
+- Do not answer, translate, or route the request.
+"""
+
+TOOL_ROUTER_SYSTEM_PROMPT = """You are the semantic tool router for the NCAIR LMS assistant.
+The user's language is supplied separately. Do not classify language.
+Return exactly one JSON object and no prose.
 
 Allowed tools:
 1. get_portal_link
-   arguments: {"action": one of the documented portal actions}
+   arguments: {"action":"<one allowed action>"}
+   allowed actions: main, login, signin, ncair_home, register, profile, courses,
+   track_selection, support
 2. get_step_guidance
-   arguments: {"step": 1, 2, 3, or 4}
+   arguments: {"step":1|2|3|4}
 3. search_ncair_knowledge_base
-   arguments: {"query": "<concise English retrieval query>"}
+   arguments: {"query":"<concise English retrieval query>"}
 
-Schema:
-{
-  "language": "english|hausa|yoruba|igbo",
-  "tool": "get_portal_link|get_step_guidance|search_ncair_knowledge_base",
-  "arguments": {...}
-}
+Routing rules:
+- Choose exactly one tool.
+- Use get_portal_link only when the user is asking to open, find, visit, or navigate to a
+  specific NCAIR/LMS page or destination.
+- Portal actions must be one of the exact allowed action values above.
+- Use get_step_guidance only when the user explicitly refers to numbered onboarding step
+  1, 2, 3, or 4.
+- Use search_ncair_knowledge_base for factual questions, policies, requirements,
+  troubleshooting, general onboarding, claims to verify, and facts that may be undocumented.
+- For search_ncair_knowledge_base, write the retrieval query in concise English even when
+  the user wrote in another supported language.
+- Never invent a portal action, tool, or step number.
+"""
+
+EVIDENCE_SYSTEM_PROMPT = """Judge whether the supplied official NCAIR evidence is sufficient
+to answer the user's question. Return exactly one JSON object and no prose:
+
+{"supported":true|false}
 
 Rules:
-- Choose exactly one tool.
-- Understand paraphrases semantically, not by literal keywords.
-- The "language" field must identify the language of the user's input. Do not infer it
-  from proper nouns, URLs, tool names, or the language of an answer you expect to produce.
-- For Hausa, Yoruba, or Igbo knowledge questions, translate only the retrieval query into English.
-  Keep the "language" field as the user's input language.
-- Use get_step_guidance only when the user explicitly refers to a numbered onboarding step
-  (step/mataki/ìgbésẹ̀ plus 1, 2, 3, or 4). General onboarding or "how do I start?" questions
-  belong to search_ncair_knowledge_base.
-- Use the knowledge-base tool for policies, programme facts, troubleshooting, general onboarding,
-  and unsupported facts.
-- Do not invent tools, actions, or step numbers.
-
-Examples:
-User: Don fara amfani da NCAIR LMS, me zan yi?
-Assistant: {"language":"hausa","tool":"search_ncair_knowledge_base",
-"arguments":{"query":"NCAIR LMS onboarding getting started"}}
-
-User: Báwo ni mo ṣe lè bẹ̀rẹ̀ lílo NCAIR LMS?
-Assistant: {"language":"yoruba","tool":"search_ncair_knowledge_base",
-"arguments":{"query":"NCAIR LMS onboarding getting started"}}
-
-User: Kedu ka m ga-esi malite iji NCAIR LMS?
-Assistant: {"language":"igbo","tool":"search_ncair_knowledge_base",
-"arguments":{"query":"NCAIR LMS onboarding getting started"}}
-
-User: Me zan yi a mataki na 2?
-Assistant: {"language":"hausa","tool":"get_step_guidance","arguments":{"step":2}}
+- Use only the supplied evidence. Do not use outside knowledge.
+- supported=true only when the evidence directly contains enough information to answer the
+  question or directly correct the claim being checked.
+- Topical similarity, shared words, or a passage about the same broad subject is not enough.
+- If the question asks for a specific fact that the evidence does not state, return false.
+- If the evidence is empty, irrelevant, or ambiguous about the requested fact, return false.
 """
 
 
@@ -216,75 +216,193 @@ def _json_object(raw: str) -> dict:
         LOGGER.warning("natlas_repaired_truncated_json raw=%r", candidate[:1000])
 
     if not isinstance(value, dict):
-        raise InvalidModelOutputError("N-ATLaS routing output must be a JSON object.")
+        raise InvalidModelOutputError("N-ATLaS output must be a JSON object.")
     return value
 
 
-class NatlasRouter:
+class NatlasLanguageDetector:
     def __init__(self, client: NatlasTextClient):
         self._client = client
 
-    def route(self, question: str) -> RoutingDecision:
-        raw = self._client.generate(
-            [
-                {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
-                {"role": "user", "content": question},
-            ],
-            max_new_tokens=180,
-        )
+    @staticmethod
+    def _parse(raw: str) -> Language:
         try:
             payload = _json_object(raw)
-            language = Language(str(payload["language"]).lower())
-            tool = ToolName(str(payload["tool"]))
-            arguments = payload["arguments"]
-        except InvalidModelOutputError:
-            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
-            raise
+            return Language(str(payload["language"]).lower())
         except (KeyError, TypeError, ValueError) as exc:
-            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
-            raise InvalidModelOutputError("N-ATLaS routing output has an invalid schema.") from exc
+            raise InvalidModelOutputError("N-ATLaS returned an invalid language label.") from exc
 
-        if not isinstance(arguments, dict):
-            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
-            raise InvalidModelOutputError("N-ATLaS tool arguments must be an object.")
+    def detect(self, question: str) -> Language:
+        messages = [
+            {"role": "system", "content": LANGUAGE_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
+        raw = self._client.generate(messages, max_new_tokens=40)
 
-        if tool is ToolName.PORTAL_LINK:
+        try:
+            return self._parse(raw)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_language_output raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous output was invalid. Return only the required JSON with "
+                            "one allowed language value: english, hausa, yoruba, or igbo."
+                        ),
+                    },
+                ],
+                max_new_tokens=40,
+            )
             try:
-                action = PortalAction(str(arguments["action"]).lower())
-            except (KeyError, ValueError) as exc:
-                LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
-                raise InvalidModelOutputError("Invalid get_portal_link action.") from exc
-            return RoutingDecision(
+                return self._parse(retry)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning("natlas_invalid_language_retry raw=%r", retry[:1000])
+                raise retry_error from first_error
+
+
+def _parse_tool_decision(raw: str, *, language: Language) -> RoutingDecision:
+    try:
+        payload = _json_object(raw)
+        tool = ToolName(str(payload["tool"]))
+        arguments = payload["arguments"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InvalidModelOutputError("N-ATLaS routing output has an invalid schema.") from exc
+
+    if not isinstance(arguments, dict):
+        raise InvalidModelOutputError("N-ATLaS tool arguments must be an object.")
+
+    try:
+        if tool is ToolName.PORTAL_LINK:
+            action = PortalAction(str(arguments["action"]).lower())
+            decision = RoutingDecision(
                 language=language,
                 tool=tool,
                 action=action,
                 status=RoutingStatus.MODEL,
-            ).validate()
-
-        if tool is ToolName.STEP_GUIDANCE:
+            )
+        elif tool is ToolName.STEP_GUIDANCE:
             step = arguments.get("step")
             if isinstance(step, bool) or not isinstance(step, int):
-                LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
                 raise InvalidModelOutputError("get_step_guidance.step must be an integer.")
-            return RoutingDecision(
+            decision = RoutingDecision(
                 language=language,
                 tool=tool,
                 step=step,
                 status=RoutingStatus.MODEL,
-            ).validate()
-
-        query = arguments.get("query")
-        if not isinstance(query, str) or not query.strip():
-            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
-            raise InvalidModelOutputError(
-                "search_ncair_knowledge_base.query must be a non-empty string."
             )
-        return RoutingDecision(
-            language=language,
-            tool=tool,
-            retrieval_query=query.strip(),
-            status=RoutingStatus.MODEL,
-        ).validate()
+        else:
+            query = arguments.get("query")
+            if not isinstance(query, str) or not query.strip():
+                raise InvalidModelOutputError(
+                    "search_ncair_knowledge_base.query must be a non-empty string."
+                )
+            decision = RoutingDecision(
+                language=language,
+                tool=tool,
+                retrieval_query=query.strip(),
+                status=RoutingStatus.MODEL,
+            )
+
+        return decision.validate()
+    except (KeyError, ValueError, InvalidToolArgumentsError) as exc:
+        raise InvalidModelOutputError(str(exc)) from exc
+
+
+class NatlasRouter:
+    def __init__(
+        self,
+        client: NatlasTextClient,
+        language_detector: NatlasLanguageDetector | None = None,
+    ):
+        self._client = client
+        self._language_detector = language_detector or NatlasLanguageDetector(client)
+
+    def route(self, question: str) -> RoutingDecision:
+        language = self._language_detector.detect(question)
+        messages = [
+            {"role": "system", "content": TOOL_ROUTER_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Input language: {language.value}\nUser request:\n{question}",
+            },
+        ]
+        raw = self._client.generate(messages, max_new_tokens=180)
+
+        try:
+            return _parse_tool_decision(raw, language=language)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous tool decision was invalid. Correct it using only the "
+                            "documented tool schema and exact allowed enum values. "
+                            f"Validation error: {first_error}"
+                        ),
+                    },
+                ],
+                max_new_tokens=180,
+            )
+            try:
+                return _parse_tool_decision(retry, language=language)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning("natlas_invalid_route_retry raw=%r", retry[:1000])
+                raise retry_error from first_error
+
+
+class NatlasEvidenceVerifier:
+    def __init__(self, client: NatlasTextClient):
+        self._client = client
+
+    @staticmethod
+    def _parse(raw: str) -> bool:
+        payload = _json_object(raw)
+        supported = payload.get("supported")
+        if not isinstance(supported, bool):
+            raise InvalidModelOutputError("N-ATLaS evidence verdict must contain a boolean.")
+        return supported
+
+    def is_supported(self, *, question: str, evidence: str) -> bool:
+        messages = [
+            {"role": "system", "content": EVIDENCE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Question:\n{question}\n\nOfficial evidence:\n{evidence}",
+            },
+        ]
+        raw = self._client.generate(messages, max_new_tokens=40)
+
+        try:
+            return self._parse(raw)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_evidence_verdict raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous verdict was invalid. Return only "
+                            '{"supported":true} or {"supported":false}.'
+                        ),
+                    },
+                ],
+                max_new_tokens=40,
+            )
+            try:
+                return self._parse(retry)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning("natlas_invalid_evidence_retry raw=%r", retry[:1000])
+                raise retry_error from first_error
 
 
 class NatlasGroundedAnswerer:

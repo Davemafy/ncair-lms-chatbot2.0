@@ -53,7 +53,7 @@ def run(version: str, mode: str) -> dict:
 
         try:
             decision = service.route(record["question"])
-            tool_result = service.execute(decision)
+            tool_result = service.execute(decision, question=record["question"])
             evidence = tool_result.evidence.as_context().lower()
 
             result["actual_tool"] = decision.tool.value

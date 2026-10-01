@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Protocol
 
 import requests
 
 from .config import Settings
 from .models import AssistantResponse, Language, RoutingDecision, ToolName, ToolResult
-from .natlas import LocalNatlasClient, NatlasGroundedAnswerer, NatlasRouter
+from .natlas import LocalNatlasClient, NatlasEvidenceVerifier, NatlasGroundedAnswerer, NatlasRouter
 from .rag import KnowledgeBase
 from .tools import execute_tool
 from .v1_router import V1KeywordRouter
@@ -40,6 +41,10 @@ class Router(Protocol):
 
 class GroundedAnswerer(Protocol):
     def answer(self, *, question: str, language: Language, evidence: str) -> str: ...
+
+
+class EvidenceVerifier(Protocol):
+    def is_supported(self, *, question: str, evidence: str) -> bool: ...
 
 
 class OllamaAnswerer:
@@ -80,6 +85,7 @@ class AssistantService:
         knowledge_base: KnowledgeBase | None = None,
         router: Router | None = None,
         answerer: GroundedAnswerer | None = None,
+        verifier: EvidenceVerifier | None = None,
     ):
         if version not in {"v1", "v2"}:
             raise ValueError("version must be 'v1' or 'v2'.")
@@ -93,7 +99,7 @@ class AssistantService:
         )
 
         natlas_client = None
-        if version == "v2" and (router is None or answerer is None):
+        if version == "v2" and (router is None or answerer is None or verifier is None):
             natlas_client = LocalNatlasClient(self.settings)
 
         if router is not None:
@@ -112,6 +118,14 @@ class AssistantService:
             assert natlas_client is not None
             self.answerer = NatlasGroundedAnswerer(natlas_client, self.settings)
 
+        if version == "v1":
+            self.verifier = None
+        elif verifier is not None:
+            self.verifier = verifier
+        else:
+            assert natlas_client is not None
+            self.verifier = NatlasEvidenceVerifier(natlas_client)
+
     def route(self, question: str) -> RoutingDecision:
         decision = self.router.route(question)
         LOGGER.info(
@@ -122,13 +136,31 @@ class AssistantService:
         )
         return decision
 
-    def execute(self, decision: RoutingDecision) -> ToolResult:
-        return execute_tool(
+    def execute(self, decision: RoutingDecision, *, question: str | None = None) -> ToolResult:
+        result = execute_tool(
             decision,
             self.knowledge_base,
             top_k=self.settings.top_k,
             allow_full_step_sequence=self.version == "v1",
         )
+
+        if (
+            self.version == "v2"
+            and decision.tool is ToolName.KNOWLEDGE
+            and result.evidence.passages
+        ):
+            assert self.verifier is not None
+            verifier_question = question or decision.retrieval_query or ""
+            supported = self.verifier.is_supported(
+                question=verifier_question,
+                evidence=result.evidence.as_context(),
+            )
+            result = ToolResult(
+                answer=result.answer,
+                evidence=replace(result.evidence, support_verified=supported),
+            )
+
+        return result
 
     def respond(
         self,
@@ -151,14 +183,18 @@ class AssistantService:
                 evidence=evidence,
             )
 
+        sources = result.evidence.sources
+        if decision.tool is ToolName.KNOWLEDGE and not result.evidence.supported:
+            sources = ()
+
         return AssistantResponse(
             answer=answer,
             language=decision.language,
             tool=decision.tool,
-            sources=result.evidence.sources,
+            sources=sources,
         )
 
     def chat(self, question: str) -> AssistantResponse:
         decision = self.route(question)
-        tool_result = self.execute(decision)
+        tool_result = self.execute(decision, question=question)
         return self.respond(question=question, decision=decision, tool_result=tool_result)
