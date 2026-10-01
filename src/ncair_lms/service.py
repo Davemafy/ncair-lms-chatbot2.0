@@ -152,9 +152,7 @@ class AssistantService:
             assert self.verifier is not None
             verifier_question = decision.retrieval_query or question or ""
             strongest_passage = result.evidence.passages[0]
-            verifier_evidence = (
-                f"[{strongest_passage.citation}]\n{strongest_passage.text.strip()}"
-            )
+            verifier_evidence = f"[{strongest_passage.citation}]\n{strongest_passage.text.strip()}"
             supported = self.verifier.is_supported(
                 question=verifier_question,
                 evidence=verifier_evidence,
