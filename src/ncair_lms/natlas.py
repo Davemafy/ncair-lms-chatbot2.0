@@ -264,8 +264,10 @@ class NatlasLanguageDetector:
 
 
 def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
-    """Normalize the two structured tool-call shapes N-ATLaS can emit."""
+    """Normalize equivalent structured tool-call serializations emitted by N-ATLaS."""
     payload = _json_object(raw)
+    tool_values = {tool.value for tool in ToolName}
+    portal_values = {action.value for action in PortalAction}
 
     try:
         if "tool" in payload:
@@ -275,15 +277,22 @@ def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
                 arguments = {
                     key: value for key, value in payload.items() if key not in {"tool", "language"}
                 }
-        elif "action" in payload and str(payload["action"]) in {tool.value for tool in ToolName}:
+        elif "action" in payload and str(payload["action"]) in tool_values:
             tool = ToolName(str(payload["action"]))
             arguments = {
                 key: value for key, value in payload.items() if key not in {"action", "language"}
             }
+        elif "action" in payload and str(payload["action"]).lower() in portal_values:
+            tool = ToolName.PORTAL_LINK
+            arguments = {"action": str(payload["action"]).lower()}
         else:
-            raise InvalidModelOutputError(
-                "N-ATLaS routing output must identify one documented tool."
-            )
+            keyed_tools = [key for key in payload if key in tool_values]
+            if len(keyed_tools) != 1:
+                raise InvalidModelOutputError(
+                    "N-ATLaS routing output must identify one documented tool."
+                )
+            tool = ToolName(keyed_tools[0])
+            arguments = payload[keyed_tools[0]]
     except (TypeError, ValueError) as exc:
         raise InvalidModelOutputError("N-ATLaS routing output has an invalid tool.") from exc
 
