@@ -96,7 +96,7 @@ install_runtime() {
 start_server() {
   : >"$SERVER_LOG"
   log "Starting FastAPI on port $PORT"
-  nohup bash "$LIVE_DIR/deploy/start_lightning.sh" >>"$SERVER_LOG" 2>&1 &
+  nohup bash "$LIVE_DIR/deploy/start_lightning.sh" >>"$SERVER_LOG" 2>&1 9>&- &
   echo "$!" >"$PID_FILE"
 
   for _ in {1..120}; do
