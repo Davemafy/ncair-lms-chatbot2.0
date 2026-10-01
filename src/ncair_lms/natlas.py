@@ -342,6 +342,24 @@ def _parse_sufficiency(raw: str) -> bool:
 def _parse_knowledge_query(raw: str) -> str:
     payload = _json_object(raw)
     query = payload.get("query")
+
+    if query is None:
+        tool_values = {tool.value for tool in ToolName}
+        if payload.get("tool") == ToolName.KNOWLEDGE.value:
+            arguments = payload.get("arguments")
+            if isinstance(arguments, dict):
+                query = arguments.get("query")
+        elif payload.get("action") == ToolName.KNOWLEDGE.value:
+            query = payload.get("query")
+        elif ToolName.KNOWLEDGE.value in payload:
+            arguments = payload[ToolName.KNOWLEDGE.value]
+            if isinstance(arguments, dict):
+                query = arguments.get("query")
+        elif any(key in payload for key in tool_values):
+            raise InvalidModelOutputError(
+                "N-ATLaS knowledge fallback returned the wrong tool family."
+            )
+
     if not isinstance(query, str) or not query.strip():
         raise InvalidModelOutputError(
             "N-ATLaS knowledge query must be a non-empty string."
