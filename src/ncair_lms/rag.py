@@ -58,9 +58,16 @@ def _chunk_text(text: str, *, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERL
 class KnowledgeBase:
     """Lazy FAISS knowledge base built from the repository's official NCAIR source files."""
 
-    def __init__(self, data_dir: Path, *, min_score: float = 0.30):
+    def __init__(
+        self,
+        data_dir: Path,
+        *,
+        min_score: float = 0.30,
+        embedding_device: str = "cpu",
+    ):
         self._data_dir = data_dir
         self._min_score = min_score
+        self._embedding_device = embedding_device
         self._lock = threading.Lock()
         self._index = None
         self._embedding_model = None
@@ -128,7 +135,7 @@ class KnowledgeBase:
             chunks = self._load_source_chunks()
             LOGGER.info("building_faiss_index chunks=%s", len(chunks))
 
-            model = SentenceTransformer(EMBEDDING_MODEL)
+            model = SentenceTransformer(EMBEDDING_MODEL, device=self._embedding_device)
             vectors = model.encode(
                 [chunk.text for chunk in chunks],
                 normalize_embeddings=True,
