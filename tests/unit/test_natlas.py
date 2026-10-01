@@ -64,3 +64,31 @@ def test_router_prompt_keeps_user_language_and_reserves_step_tool_for_numbered_s
     assert expected in system_prompt
     assert "Don fara amfani da NCAIR LMS, me zan yi?" in system_prompt
     assert '"language":"hausa","tool":"search_ncair_knowledge_base"' in system_prompt
+
+
+
+def test_natlas_router_repairs_single_missing_closing_brace():
+    router = NatlasRouter(
+        FakeClient(
+            '{"language":"hausa","tool":"search_ncair_knowledge_base",'
+            '"arguments":{"query":"NCAIR LMS onboarding getting started"}'
+        ),
+    )
+
+    decision = router.route("Don fara amfani da NCAIR LMS, bi waɗannan matakan")
+
+    assert decision.language is Language.HAUSA
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == "NCAIR LMS onboarding getting started"
+
+
+def test_natlas_router_still_rejects_non_truncation_json_errors():
+    router = NatlasRouter(
+        FakeClient(
+            '{"language":"hausa","tool":search_ncair_knowledge_base,'
+            '"arguments":{"query":"onboarding"}}'
+        ),
+    )
+
+    with pytest.raises(InvalidModelOutputError):
+        router.route("Ina sabo a nan")
