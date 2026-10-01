@@ -41,13 +41,15 @@ class Settings:
     natlas_model: str
     natlas_device: str
     natlas_max_new_tokens: int
-    natlas_quantization: str
     hf_token: str | None
     top_k: int
     min_retrieval_score: float
     ollama_base_url: str
     ollama_model: str
     default_version: str
+    natlas_quantization: str = "none"
+    embedding_device: str = "cpu"
+    allowed_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -73,4 +75,13 @@ class Settings:
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
             ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2:3b").strip(),
             default_version=default_version,
+            embedding_device=os.getenv("EMBEDDING_DEVICE", "cpu").strip(),
+            allowed_origins=tuple(
+                origin.strip()
+                for origin in os.getenv(
+                    "NCAIR_ALLOWED_ORIGINS",
+                    "https://ncair-lms-chatbotv1.vercel.app,https://tbotv1.vercel.app",
+                ).split(",")
+                if origin.strip()
+            ),
         )
