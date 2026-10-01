@@ -46,7 +46,6 @@ def test_natlas_router_rejects_unknown_tool():
         router.route("hello")
 
 
-
 def test_router_prompt_keeps_user_language_and_reserves_step_tool_for_numbered_steps():
     client = FakeClient(
         '{"language":"hausa","tool":"search_ncair_knowledge_base",'
@@ -61,6 +60,6 @@ def test_router_prompt_keeps_user_language_and_reserves_step_tool_for_numbered_s
     assert client.messages is not None
     system_prompt = client.messages[0]["content"]
     assert '"language" field must identify the language of the user\'s input' in system_prompt
-    assert "Use get_step_guidance only when the user explicitly refers to a numbered" in system_prompt
+    expected = "Use get_step_guidance only when the user explicitly refers to a numbered"\n    assert expected in system_prompt
     assert "Don fara amfani da NCAIR LMS, me zan yi?" in system_prompt
     assert '"language":"hausa","tool":"search_ncair_knowledge_base"' in system_prompt
