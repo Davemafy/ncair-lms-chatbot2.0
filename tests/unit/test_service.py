@@ -93,7 +93,12 @@ def test_v2_service_keeps_language_and_grounding(tmp_path):
     assert "75%" in response.answer
     assert verifier.calls == 1
     assert verifier.questions == ["attendance requirement"]
-    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
+    assert verifier.evidence == [
+        (
+            "[guide.txt]\nAttendance requires 75%.\n\n---\n\n"
+            "[other.txt]\nUnrelated onboarding information."
+        )
+    ]
     assert answerer.calls == 1
 
 
@@ -117,5 +122,10 @@ def test_v2_service_rejects_retrieval_that_does_not_answer_question(tmp_path):
     assert "Ban sami isasshen bayani" in response.answer
     assert verifier.calls == 1
     assert verifier.questions == ["attendance requirement"]
-    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
+    assert verifier.evidence == [
+        (
+            "[guide.txt]\nAttendance requires 75%.\n\n---\n\n"
+            "[other.txt]\nUnrelated onboarding information."
+        )
+    ]
     assert answerer.calls == 0
