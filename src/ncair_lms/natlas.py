@@ -333,9 +333,7 @@ def _parse_sufficiency(raw: str) -> bool:
     payload = _json_object(raw)
     sufficient = payload.get("sufficient")
     if not isinstance(sufficient, bool):
-        raise InvalidModelOutputError(
-            "N-ATLaS tool-sufficiency verdict must contain a boolean."
-        )
+        raise InvalidModelOutputError("N-ATLaS tool-sufficiency verdict must contain a boolean.")
     return sufficient
 
 
@@ -361,9 +359,7 @@ def _parse_knowledge_query(raw: str) -> str:
             )
 
     if not isinstance(query, str) or not query.strip():
-        raise InvalidModelOutputError(
-            "N-ATLaS knowledge query must be a non-empty string."
-        )
+        raise InvalidModelOutputError("N-ATLaS knowledge query must be a non-empty string.")
     return query.strip()
 
 
@@ -464,10 +460,7 @@ class NatlasRouter:
             {"role": "system", "content": TOOL_SUFFICIENCY_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"User request:\n{question}\n\n"
-                    f"Candidate tool call:\n{candidate}"
-                ),
+                "content": (f"User request:\n{question}\n\nCandidate tool call:\n{candidate}"),
             },
         ]
         raw = self._client.generate(messages, max_new_tokens=40)
