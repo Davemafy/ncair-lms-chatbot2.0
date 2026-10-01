@@ -3,7 +3,6 @@ import pytest
 from ncair_lms.errors import InvalidModelOutputError
 from ncair_lms.models import Language, PortalAction, ToolName
 from ncair_lms.natlas import (
-    EVIDENCE_SYSTEM_PROMPT,
     KNOWLEDGE_QUERY_SYSTEM_PROMPT,
     LANGUAGE_SYSTEM_PROMPT,
     TOOL_ROUTER_SYSTEM_PROMPT,
