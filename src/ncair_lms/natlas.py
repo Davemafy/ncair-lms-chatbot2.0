@@ -190,22 +190,27 @@ class NatlasRouter:
             ],
             max_new_tokens=180,
         )
-        payload = _json_object(raw)
-
         try:
+            payload = _json_object(raw)
             language = Language(str(payload["language"]).lower())
             tool = ToolName(str(payload["tool"]))
             arguments = payload["arguments"]
+        except InvalidModelOutputError:
+            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
+            raise
         except (KeyError, TypeError, ValueError) as exc:
+            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
             raise InvalidModelOutputError("N-ATLaS routing output has an invalid schema.") from exc
 
         if not isinstance(arguments, dict):
+            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
             raise InvalidModelOutputError("N-ATLaS tool arguments must be an object.")
 
         if tool is ToolName.PORTAL_LINK:
             try:
                 action = PortalAction(str(arguments["action"]).lower())
             except (KeyError, ValueError) as exc:
+                LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
                 raise InvalidModelOutputError("Invalid get_portal_link action.") from exc
             return RoutingDecision(
                 language=language,
@@ -217,6 +222,7 @@ class NatlasRouter:
         if tool is ToolName.STEP_GUIDANCE:
             step = arguments.get("step")
             if isinstance(step, bool) or not isinstance(step, int):
+                LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
                 raise InvalidModelOutputError("get_step_guidance.step must be an integer.")
             return RoutingDecision(
                 language=language,
@@ -227,6 +233,7 @@ class NatlasRouter:
 
         query = arguments.get("query")
         if not isinstance(query, str) or not query.strip():
+            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
             raise InvalidModelOutputError(
                 "search_ncair_knowledge_base.query must be a non-empty string."
             )
