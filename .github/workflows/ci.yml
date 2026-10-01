@@ -18,6 +18,7 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
+      - run: bash -n deploy/*.sh
       - run: python -m eval.validate_benchmark
       - run: python -m pytest tests/unit
 

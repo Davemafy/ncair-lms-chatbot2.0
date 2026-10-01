@@ -101,3 +101,89 @@ NCAIR_UPSTREAM_URL=https://8000-01m3v6dv3dbzrxn6resd7ms958.cloudspaces.litng.ai
 ```
 
 If the Lightning forwarded address ever changes, update only that Vercel environment variable and redeploy.
+
+
+## Automatic N-ATLaS updates and restart recovery
+
+The production Studio can run without manual `git pull` or manual server restarts.
+
+### Deployment flow
+
+```text
+merge to main
+  -> GitHub CI
+  -> successful main commit promoted to lightning-live
+  -> Studio supervisor notices lightning-live changed
+  -> stop old API
+  -> checkout exact CI-tested commit
+  -> ensure runtime dependencies
+  -> start FastAPI
+  -> warm N-ATLaS + FAISS with an end-to-end Hausa request
+  -> mark deployment healthy
+
+Studio sleep/restart
+  -> ~/.lightning_studio/on_start.sh
+  -> supervisor starts
+  -> latest lightning-live is deployed
+  -> API is warmed automatically
+```
+
+If a new commit fails to start or fails the warm-up request, the supervisor rolls back to
+the last healthy commit. Failed commits are retried after ten minutes rather than causing
+a restart loop.
+
+### One-time Studio setup
+
+1. Add `HF_TOKEN` to **Studio -> Environment variables** or to Teamspace Secrets. Do not
+   keep the token only in a terminal `export`; terminal exports disappear when the machine
+   restarts.
+
+2. Keep these defaults unless the runtime changes:
+
+```text
+NATLAS_MODEL=NCAIR1/N-ATLaS
+NATLAS_DEVICE=auto
+NATLAS_QUANTIZATION=4bit
+NCAIR_DEFAULT_VERSION=v2
+EMBEDDING_DEVICE=cpu
+```
+
+3. Pull the automation commit and install the startup hook once:
+
+```bash
+cd ~/ncair-lms-chatbot2.0
+git checkout main
+git pull --ff-only origin main
+./deploy/install_lightning_automation.sh
+```
+
+The installer copies the boot hook to `~/.lightning_studio/on_start.sh`, creates a separate
+`~/ncair-lms-live` checkout for production, installs missing Poppler/Tesseract packages,
+stops the manually started port-8000 process, and starts the managed supervisor.
+
+4. In the Lightning port/endpoint controls for port `8000`, enable **Auto Start**. Lightning
+   documents Auto Start as the mode that wakes a stopped Studio when the public endpoint is
+   requested.
+
+### Operations
+
+Follow deployment activity:
+
+```bash
+tail -f ~/.local/state/ncair-lms/supervisor.log
+```
+
+Follow the API/model log:
+
+```bash
+tail -f ~/.local/state/ncair-lms/server.log
+```
+
+See the currently healthy production commit:
+
+```bash
+cat ~/.local/state/ncair-lms/healthy.sha
+```
+
+The supervisor polls the CI-gated `lightning-live` branch every 60 seconds. Override with
+`NCAIR_DEPLOY_POLL_SECONDS` if needed.
