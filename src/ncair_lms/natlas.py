@@ -4,6 +4,7 @@ import json
 import logging
 from collections.abc import Sequence
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol
 
 from .config import Settings
@@ -12,24 +13,48 @@ from .models import Language, PortalAction, RoutingDecision, RoutingStatus, Tool
 
 LOGGER = logging.getLogger(__name__)
 
-LANGUAGE_SYSTEM_PROMPT = """Classify the user's input language for the NCAIR LMS assistant.
-Return exactly one JSON object and no prose:
+LANGUAGE_SYSTEM_PROMPT = """Classify the linguistic carrier of the user's input for the
+NCAIR LMS assistant. Return exactly one JSON object and no prose:
 
 {"language":"english|hausa|yoruba|igbo"}
 
 Rules:
 - Choose exactly one of english, hausa, yoruba, or igbo.
-- Identify the language from the sentence's grammar and function words.
-- Do not let names, URLs, acronyms, course names, or English technical terms determine the label.
-- For code-switched text, choose the language carrying most of the sentence grammar.
-- Do not answer, translate, or route the request.
+- Base the label on sentence grammar, function words, morphology, and word order.
+- Borrowed technical nouns, names, URLs, acronyms, and course labels do not override the
+  surrounding grammar.
+- For code-switched text, choose the supported language carrying most of the grammatical
+  structure.
+- Ignore isolated foreign-script noise or punctuation when the surrounding sentence clearly
+  belongs to one supported language.
+- Do not answer, translate, infer intent, or route the request.
 """
 
-TOOL_ROUTER_SYSTEM_PROMPT = """You are the semantic tool router for the NCAIR LMS assistant.
-The user's language is supplied separately. Do not classify language.
+INTENT_SYSTEM_PROMPT = """Classify only the user's requested outcome for the NCAIR LMS
+assistant. Return exactly one JSON object and no prose:
+
+{"intent":"navigation|numbered_step|knowledge"}
+
+Definitions:
+- navigation: the requested outcome is a page, link, URL, or destination to open, find, or visit.
+- numbered_step: the user explicitly asks about onboarding step 1, 2, 3, or 4.
+- knowledge: the user wants information rather than a destination, including facts, policies,
+  requirements, limits, schedules, troubleshooting, claim verification, or information that
+  may be undocumented.
+
+Rules:
+- Classify the request by what the user wants done, not by topic words.
+- A topic that also has a portal page is still knowledge when the user asks a factual question
+  about that topic.
+- Use numbered_step only for an explicit numbered onboarding step.
+- Do not choose a tool, portal action, step value, or retrieval query.
+"""
+
+TOOL_ROUTER_SYSTEM_PROMPT = """You are the argument-selection stage for the NCAIR LMS
+assistant. A previous N-ATLaS stage has already fixed the semantic intent and required tool.
 Return exactly one JSON object and no prose.
 
-Allowed tools:
+Tool schemas:
 1. get_portal_link
    arguments: {"action":"<one allowed action>"}
    allowed actions: main, login, signin, ncair_home, register, profile, courses,
@@ -39,32 +64,44 @@ Allowed tools:
 3. search_ncair_knowledge_base
    arguments: {"query":"<concise English retrieval query>"}
 
-Routing rules:
-- Choose exactly one tool.
-- Use get_portal_link only when the user is asking to open, find, visit, or navigate to a
-  specific NCAIR/LMS page or destination.
-- Portal actions must be one of the exact allowed action values above.
-- Use get_step_guidance only when the user explicitly refers to numbered onboarding step
-  1, 2, 3, or 4.
-- Use search_ncair_knowledge_base for factual questions, policies, requirements,
-  troubleshooting, general onboarding, claims to verify, and facts that may be undocumented.
-- For search_ncair_knowledge_base, write the retrieval query in concise English even when
-  the user wrote in another supported language.
+Rules:
+- Use only the required tool supplied with the request. Do not change the tool family.
+- For get_portal_link, choose exactly one allowed portal action.
+- For get_step_guidance, return only the explicit step number requested by the user.
+- For search_ncair_knowledge_base, preserve the information need and write a concise English
+  retrieval query even when the user wrote in another supported language.
+- Do not answer the user's question.
 - Never invent a portal action, tool, or step number.
 """
 
-EVIDENCE_SYSTEM_PROMPT = """Decide whether one official NCAIR passage directly answers the
-retrieval question. Return exactly one JSON object and no prose:
+EVIDENCE_SYSTEM_PROMPT = """Decide whether the supplied set of official NCAIR passages
+contains enough explicit evidence to answer the retrieval question. Return exactly one JSON
+object and no prose:
 
 {"supported":true|false}
 
 Rules:
-- Use only the supplied passage. Do not use outside knowledge.
-- Return true when the passage explicitly states the requested fact or directly corrects the
-  claim in the question.
+- Use only the supplied passages. Do not use outside knowledge.
+- Return true when any passage, or a direct combination of the passages, explicitly states
+  the requested fact or directly confirms/corrects the claim in the question.
 - Different wording is fine; the requested fact itself must be present.
-- Return false for mere topical similarity, missing facts, or ambiguous evidence.
+- Do not infer a missing fact from topical similarity.
+- Return false when the passages are related to the topic but do not contain the requested
+  attribute, rule, limit, date, contact, or other fact.
 """
+
+
+class RoutingIntent(StrEnum):
+    NAVIGATION = "navigation"
+    NUMBERED_STEP = "numbered_step"
+    KNOWLEDGE = "knowledge"
+
+
+_INTENT_TO_TOOL = {
+    RoutingIntent.NAVIGATION: ToolName.PORTAL_LINK,
+    RoutingIntent.NUMBERED_STEP: ToolName.STEP_GUIDANCE,
+    RoutingIntent.KNOWLEDGE: ToolName.KNOWLEDGE,
+}
 
 
 class NatlasTextClient(Protocol):
@@ -263,7 +300,19 @@ class NatlasLanguageDetector:
                 raise retry_error from first_error
 
 
-def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
+def _parse_intent(raw: str) -> RoutingIntent:
+    try:
+        payload = _json_object(raw)
+        return RoutingIntent(str(payload["intent"]).lower())
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InvalidModelOutputError("N-ATLaS returned an invalid routing intent.") from exc
+
+
+def _normalized_tool_call(
+    raw: str,
+    *,
+    expected_tool: ToolName | None = None,
+) -> tuple[ToolName, dict]:
     """Normalize equivalent structured tool-call serializations emitted by N-ATLaS."""
     payload = _json_object(raw)
     tool_values = {tool.value for tool in ToolName}
@@ -287,12 +336,18 @@ def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
             arguments = {"action": str(payload["action"]).lower()}
         else:
             keyed_tools = [key for key in payload if key in tool_values]
-            if len(keyed_tools) != 1:
+            if len(keyed_tools) == 1:
+                tool = ToolName(keyed_tools[0])
+                arguments = payload[keyed_tools[0]]
+            elif expected_tool is not None:
+                tool = expected_tool
+                arguments = {
+                    key: value for key, value in payload.items() if key != "language"
+                }
+            else:
                 raise InvalidModelOutputError(
                     "N-ATLaS routing output must identify one documented tool."
                 )
-            tool = ToolName(keyed_tools[0])
-            arguments = payload[keyed_tools[0]]
     except (TypeError, ValueError) as exc:
         raise InvalidModelOutputError("N-ATLaS routing output has an invalid tool.") from exc
 
@@ -302,8 +357,17 @@ def _normalized_tool_call(raw: str) -> tuple[ToolName, dict]:
     return tool, arguments
 
 
-def _parse_tool_decision(raw: str, *, language: Language) -> RoutingDecision:
-    tool, arguments = _normalized_tool_call(raw)
+def _parse_tool_decision(
+    raw: str,
+    *,
+    language: Language,
+    expected_tool: ToolName | None = None,
+) -> RoutingDecision:
+    tool, arguments = _normalized_tool_call(raw, expected_tool=expected_tool)
+    if expected_tool is not None and tool is not expected_tool:
+        raise InvalidModelOutputError(
+            f"N-ATLaS changed the fixed tool family from {expected_tool.value} to {tool.value}."
+        )
 
     try:
         if tool is ToolName.PORTAL_LINK:
@@ -351,10 +415,52 @@ class NatlasRouter:
         self._client = client
         self._language_detector = language_detector or NatlasLanguageDetector(client)
 
+    def _classify_intent(self, question: str, *, language: Language) -> RoutingIntent:
+        messages = [
+            {"role": "system", "content": INTENT_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Input language: {language.value}\nUser request:\n{question}",
+            },
+        ]
+        raw = self._client.generate(messages, max_new_tokens=40)
+
+        try:
+            return _parse_intent(raw)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_intent_output raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous intent was invalid. Return only the required JSON with "
+                            "one allowed intent: navigation, numbered_step, or knowledge."
+                        ),
+                    },
+                ],
+                max_new_tokens=40,
+            )
+            try:
+                return _parse_intent(retry)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning("natlas_invalid_intent_retry raw=%r", retry[:1000])
+                raise retry_error from first_error
+
     def route(self, question: str) -> RoutingDecision:
         language = self._language_detector.detect(question)
+        intent = self._classify_intent(question, language=language)
+        expected_tool = _INTENT_TO_TOOL[intent]
+        constrained_prompt = (
+            f"{TOOL_ROUTER_SYSTEM_PROMPT}\n\n"
+            f"Fixed semantic intent: {intent.value}\n"
+            f"Required tool: {expected_tool.value}\n"
+            "Do not choose a different tool family."
+        )
         messages = [
-            {"role": "system", "content": TOOL_ROUTER_SYSTEM_PROMPT},
+            {"role": "system", "content": constrained_prompt},
             {
                 "role": "user",
                 "content": f"Input language: {language.value}\nUser request:\n{question}",
@@ -363,9 +469,17 @@ class NatlasRouter:
         raw = self._client.generate(messages, max_new_tokens=180)
 
         try:
-            return _parse_tool_decision(raw, language=language)
+            return _parse_tool_decision(
+                raw,
+                language=language,
+                expected_tool=expected_tool,
+            )
         except InvalidModelOutputError as first_error:
-            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
+            LOGGER.warning(
+                "natlas_invalid_route_output intent=%s raw=%r",
+                intent.value,
+                raw[:1000],
+            )
             retry = self._client.generate(
                 [
                     *messages,
@@ -373,8 +487,9 @@ class NatlasRouter:
                     {
                         "role": "user",
                         "content": (
-                            "The previous tool decision was invalid. Correct it using only the "
-                            "documented tool schema and exact allowed enum values. "
+                            "The previous tool arguments were invalid. Keep the fixed tool "
+                            f"{expected_tool.value} and correct only its arguments using the "
+                            "documented schema and exact allowed enum values. "
                             f"Validation error: {first_error}"
                         ),
                     },
@@ -382,9 +497,17 @@ class NatlasRouter:
                 max_new_tokens=180,
             )
             try:
-                return _parse_tool_decision(retry, language=language)
+                return _parse_tool_decision(
+                    retry,
+                    language=language,
+                    expected_tool=expected_tool,
+                )
             except InvalidModelOutputError as retry_error:
-                LOGGER.warning("natlas_invalid_route_retry raw=%r", retry[:1000])
+                LOGGER.warning(
+                    "natlas_invalid_route_retry intent=%s raw=%r",
+                    intent.value,
+                    retry[:1000],
+                )
                 raise retry_error from first_error
 
 
