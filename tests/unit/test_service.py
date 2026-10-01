@@ -13,7 +13,10 @@ class FakeKnowledgeBase:
     def search(self, query, *, top_k):
         del query, top_k
         return RetrievedEvidence(
-            (EvidencePassage(source="guide.txt", text="Attendance requires 75%."),)
+            (
+                EvidencePassage(source="guide.txt", text="Attendance requires 75%."),
+                EvidencePassage(source="other.txt", text="Unrelated onboarding information."),
+            )
         )
 
 
@@ -44,10 +47,12 @@ class FakeVerifier:
         self.supported = supported
         self.calls = 0
         self.questions = []
+        self.evidence = []
 
     def is_supported(self, *, question, evidence):
         self.calls += 1
         self.questions.append(question)
+        self.evidence.append(evidence)
         assert question
         assert evidence
         return self.supported
@@ -88,6 +93,7 @@ def test_v2_service_keeps_language_and_grounding(tmp_path):
     assert "75%" in response.answer
     assert verifier.calls == 1
     assert verifier.questions == ["attendance requirement"]
+    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
     assert answerer.calls == 1
 
 
@@ -111,4 +117,5 @@ def test_v2_service_rejects_retrieval_that_does_not_answer_question(tmp_path):
     assert "Ban sami isasshen bayani" in response.answer
     assert verifier.calls == 1
     assert verifier.questions == ["attendance requirement"]
+    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
     assert answerer.calls == 0
