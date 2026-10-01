@@ -88,3 +88,16 @@ The frontend uses the same origin, so no separate CORS configuration is required
 Keep the Studio on CPU while installing packages and downloading model files. Switch to GPU only immediately before testing or demonstrating N-ATLaS.
 
 Free-tier Studios require periodic restarts. Persistent Studio storage keeps the repository and downloaded model files between restarts.
+
+
+## Vercel frontend
+
+The Vercel-hosted UI uses same-origin `/api/*` endpoints. The small functions under `web/api/` proxy those requests to Lightning, so changing the Vercel project URL or attaching a custom domain does not require a code change and does not depend on browser CORS.
+
+Set this Vercel environment variable for Production (and Preview if desired):
+
+```text
+NCAIR_UPSTREAM_URL=https://8000-01m3v6dv3dbzrxn6resd7ms958.cloudspaces.litng.ai
+```
+
+If the Lightning forwarded address ever changes, update only that Vercel environment variable and redeploy.
