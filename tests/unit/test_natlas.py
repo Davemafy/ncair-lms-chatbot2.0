@@ -202,6 +202,21 @@ def test_natlas_router_retries_invalid_knowledge_fallback_query_once():
     assert len(client.calls) == 5
 
 
+def test_natlas_router_accepts_wrapped_knowledge_fallback_query():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"action":"support"}',
+        '{"sufficient":false}',
+        '{"search_ncair_knowledge_base":{"query":"support requirements"}}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("Explain the support requirements.")
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == "support requirements"
+
+
 def test_natlas_router_rejects_unknown_flat_action_after_retry():
     client = FakeClient(
         '{"language":"english"}',
