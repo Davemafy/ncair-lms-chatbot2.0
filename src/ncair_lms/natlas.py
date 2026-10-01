@@ -53,18 +53,17 @@ Routing rules:
 - Never invent a portal action, tool, or step number.
 """
 
-EVIDENCE_SYSTEM_PROMPT = """Judge whether the supplied official NCAIR evidence is sufficient
-to answer the user's question. Return exactly one JSON object and no prose:
+EVIDENCE_SYSTEM_PROMPT = """Decide whether one official NCAIR passage directly answers the
+retrieval question. Return exactly one JSON object and no prose:
 
 {"supported":true|false}
 
 Rules:
-- Use only the supplied evidence. Do not use outside knowledge.
-- supported=true only when the evidence directly contains enough information to answer the
-  question or directly correct the claim being checked.
-- Topical similarity, shared words, or a passage about the same broad subject is not enough.
-- If the question asks for a specific fact that the evidence does not state, return false.
-- If the evidence is empty, irrelevant, or ambiguous about the requested fact, return false.
+- Use only the supplied passage. Do not use outside knowledge.
+- Return true when the passage explicitly states the requested fact or directly corrects the
+  claim in the question.
+- Different wording is fine; the requested fact itself must be present.
+- Return false for mere topical similarity, missing facts, or ambiguous evidence.
 """
 
 
