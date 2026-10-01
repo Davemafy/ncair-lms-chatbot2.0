@@ -57,3 +57,19 @@ A successful response should report `"language": "hausa"` and must not contain t
 The deployment requests one L4 GPU, permits at most one running GPU container, and scales to zero after 30 seconds idle.
 
 Do not run the complete 60-case benchmark against this public endpoint while the account has only a small credit balance. Use dedicated benchmark compute instead.
+
+
+## Automatic deployment from GitHub
+
+Production deployment is handled by `.github/workflows/deploy-modal.yml`.
+
+After the normal `ci` workflow succeeds on `main`, GitHub Actions deploys that exact tested commit to Modal. The workflow can also be started manually with **Actions → deploy-modal → Run workflow**.
+
+Add these repository secrets before enabling automatic deploys:
+
+- `MODAL_TOKEN_ID`
+- `MODAL_TOKEN_SECRET`
+
+Generate or retrieve a Modal API token from the Modal workspace settings or CLI. Never commit the token or put it in repository variables.
+
+Model weights are intentionally not refreshed on every source-code deployment. The persistent `ncair-lms-hf-cache` volume keeps the approved N-ATLaS weights stable. Refresh the cache deliberately when changing model revisions.
