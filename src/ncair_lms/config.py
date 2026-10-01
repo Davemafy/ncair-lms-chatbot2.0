@@ -47,6 +47,9 @@ class Settings:
     ollama_base_url: str
     ollama_model: str
     default_version: str
+    natlas_quantization: str = "none"
+    embedding_device: str = "cpu"
+    allowed_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -56,15 +59,29 @@ class Settings:
         if default_version not in {"v1", "v2"}:
             raise ConfigurationError("NCAIR_DEFAULT_VERSION must be either 'v1' or 'v2'.")
 
+        natlas_quantization = os.getenv("NATLAS_QUANTIZATION", "none").strip().lower()
+        if natlas_quantization not in {"none", "4bit"}:
+            raise ConfigurationError("NATLAS_QUANTIZATION must be either 'none' or '4bit'.")
+
         return cls(
             data_dir=Path(os.getenv("NCAIR_DATA_DIR", repository_root / "data")).resolve(),
             natlas_model=os.getenv("NATLAS_MODEL", "NCAIR1/N-ATLaS").strip(),
             natlas_device=os.getenv("NATLAS_DEVICE", "auto").strip(),
             natlas_max_new_tokens=_positive_int("NATLAS_MAX_NEW_TOKENS", 320),
+            natlas_quantization=natlas_quantization,
             hf_token=os.getenv("HF_TOKEN") or None,
             top_k=_positive_int("TOP_K", 3),
             min_retrieval_score=_unit_interval_float("MIN_RETRIEVAL_SCORE", 0.30),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"),
             ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2:3b").strip(),
             default_version=default_version,
+            embedding_device=os.getenv("EMBEDDING_DEVICE", "cpu").strip(),
+            allowed_origins=tuple(
+                origin.strip()
+                for origin in os.getenv(
+                    "NCAIR_ALLOWED_ORIGINS",
+                    "https://ncair-lms-chatbotv1.vercel.app,https://tbotv1.vercel.app",
+                ).split(",")
+                if origin.strip()
+            ),
         )

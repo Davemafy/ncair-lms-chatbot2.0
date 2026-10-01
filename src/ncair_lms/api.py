@@ -6,6 +6,7 @@ from pathlib import Path
 
 import requests
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -29,6 +30,15 @@ SETTINGS = Settings.from_env()
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
 app = FastAPI(title="NCAIR LMS Chatbot 2.0", version="2.0.0")
+
+if SETTINGS.allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(SETTINGS.allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
 
 
 class ChatRequest(BaseModel):

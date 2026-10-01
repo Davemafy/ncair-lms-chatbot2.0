@@ -1,3 +1,4 @@
-// Set this to the deployed Cloudflare Worker origin, without a trailing slash.
-// Example: window.NCAIR_API_URL = "https://ncair-lms-chatbot-api.example.workers.dev";
-window.NCAIR_API_URL = "https://ncair-lms-chatbot2-0.imafidondavid1.workers.dev";
+// Browser requests always stay on the current origin.
+// Vercel proxies /api/* to the configured Lightning backend; when FastAPI
+// serves this UI directly, the same paths are handled locally.
+window.NCAIR_API_URL = "";
