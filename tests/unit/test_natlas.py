@@ -66,7 +66,6 @@ def test_router_prompt_keeps_user_language_and_reserves_step_tool_for_numbered_s
     assert '"language":"hausa","tool":"search_ncair_knowledge_base"' in system_prompt
 
 
-
 def test_natlas_router_repairs_single_missing_closing_brace():
     router = NatlasRouter(
         FakeClient(
