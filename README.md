@@ -11,21 +11,21 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 ```mermaid
 flowchart LR
     A[User text] --> B[N-ATLaS language stage]
-    B --> C[N-ATLaS semantic intent stage]
-    C --> D[N-ATLaS constrained argument stage]
-    D --> E{Validated tool decision}
-    E --> F[get_portal_link]
-    E --> G[get_step_guidance]
-    E --> H[search_ncair_knowledge_base]
-    H --> I[FAISS / official NCAIR sources]
-    I --> J[N-ATLaS evidence-set sufficiency check]
-    F --> K[N-ATLaS grounded response]
-    G --> K
-    J --> K
-    K --> L[Answer in user's language]
+    B --> C[N-ATLaS direct semantic router]
+    C --> D{Selected tool}
+    D -->|knowledge| G[search_ncair_knowledge_base]
+    D -->|portal or step| E[N-ATLaS tool-sufficiency check]
+    E -->|sufficient| F[execute selected portal or step tool]
+    E -->|insufficient| Q[N-ATLaS English retrieval query]
+    Q --> G
+    G --> H[FAISS / official NCAIR sources]
+    H --> I[N-ATLaS strongest-passage evidence check]
+    F --> J[N-ATLaS grounded response]
+    I --> J
+    J --> K[Answer in user's language]
 ```
 
-V2 keeps N-ATLaS as the assessed model while separating responsibilities that fail differently. It first classifies the input language, then classifies the requested outcome as navigation, an explicit numbered onboarding step, or knowledge. A second constrained N-ATLaS stage fills only the arguments for the tool fixed by that semantic intent, so topic words cannot silently switch the tool family. Knowledge queries are normalized into concise English for FAISS. The evidence verifier receives the retrieved evidence set rather than only the first passage and must confirm that the requested fact is explicitly supported before a grounded response is generated. Invalid structured outputs receive one schema-constrained retry rather than phrase-specific fallback rules.
+V2 keeps N-ATLaS as the assessed model while preserving the direct semantic router that performed best on explicit navigation and numbered-step requests. When that router selects a portal link or numbered step, a separate N-ATLaS sufficiency check asks whether executing that exact action would actually satisfy the user's requested outcome. If not, the request is escalated to knowledge search and N-ATLaS writes a concise English retrieval query for FAISS. Knowledge decisions skip the sufficiency check. Retrieved passages are not treated as support merely because similarity search returned them: N-ATLaS verifies the strongest passage before a grounded response is generated. No benchmark phrases or keyword rules are added to the runtime router.
 
 ### V1 — comparison baseline
 
@@ -247,5 +247,5 @@ The Python V2 is the source of truth for assignment evaluation.
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
 - FAISS uses an English embedding model, so V2 deliberately asks N-ATLaS for an English retrieval query before search.
-- V2 uses separate N-ATLaS calls for language classification, semantic intent, constrained tool arguments, evidence sufficiency, and grounded answering; this favors inspectability and safety over minimum latency.
+- V2 uses separate N-ATLaS calls for language classification, direct semantic routing, conditional tool sufficiency, evidence sufficiency, and grounded answering; factual questions initially mistaken for navigation may require one additional retrieval-query generation.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
