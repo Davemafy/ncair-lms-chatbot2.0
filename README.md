@@ -10,19 +10,21 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 
 ```mermaid
 flowchart LR
-    A[User text] --> B[N-ATLaS router]
-    B --> C{Validated tool decision}
-    C --> D[get_portal_link]
-    C --> E[get_step_guidance]
-    C --> F[search_ncair_knowledge_base]
-    F --> G[FAISS / official NCAIR sources]
-    D --> H[N-ATLaS grounded response]
-    E --> H
-    G --> H
-    H --> I[Answer in user's language]
+    A[User text] --> B[N-ATLaS language stage]
+    B --> C[N-ATLaS semantic router]
+    C --> D{Validated tool decision}
+    D --> E[get_portal_link]
+    D --> F[get_step_guidance]
+    D --> G[search_ncair_knowledge_base]
+    G --> H[FAISS / official NCAIR sources]
+    H --> I[N-ATLaS evidence sufficiency check]
+    E --> J[N-ATLaS grounded response]
+    F --> J
+    I --> J
+    J --> K[Answer in user's language]
 ```
 
-N-ATLaS normalizes Hausa, Yoruba, and Igbo knowledge questions into an English retrieval query. FAISS still searches the same official source material; the final response is generated from the returned evidence.
+V2 deliberately separates three model responsibilities while keeping N-ATLaS as the assessed model: input-language classification, semantic tool selection, and evidence sufficiency. Knowledge queries are normalized into concise English for FAISS. Retrieved passages are not treated as support merely because similarity search returned them; N-ATLaS must confirm that the evidence can actually answer the question before a grounded response is generated. Invalid structured tool decisions receive one schema-constrained retry rather than phrase-specific fallback rules.
 
 ### V1 — comparison baseline
 
@@ -148,7 +150,7 @@ make test-integration
 
 ## Benchmark
 
-The held-out benchmark contains exactly 60 questions: 15 each in English, Hausa, Yoruba, and Igbo.
+The repository contains a frozen 60-question regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. After its results have been inspected, it must not be described as a blind or held-out final evaluation set. Use it to detect regressions and measure known failure classes; use a fresh unseen set for final unbiased evaluation.
 
 Category totals:
 
@@ -221,9 +223,9 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 ## Evaluation methodology
 
-The benchmark is data, not prompt material. Router prompts do not contain benchmark examples.
+The benchmark is data, not prompt material. Runtime prompts contain general contracts and enum constraints, not benchmark questions or phrase-specific routing rules.
 
-For each record the evaluator compares the selected tool, deterministic arguments, detected language, whether official evidence was found, and failures. Cross-language consistency is measured only for records sharing a `semantic_key`.
+For each record the evaluator compares the selected tool, deterministic arguments, detected language, whether retrieved official evidence is sufficient, and failures. Cross-language consistency is measured only for records sharing a `semantic_key`. The frozen 60-case set is a regression suite; final reporting should use a separate unseen holdout after the implementation is frozen.
 
 `routing` mode stops after tool execution. `full` mode additionally generates the answer.
 
@@ -244,4 +246,5 @@ The Python V2 is the source of truth for assignment evaluation.
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
 - FAISS uses an English embedding model, so V2 deliberately asks N-ATLaS for an English retrieval query before search.
+- V2 uses separate N-ATLaS calls for language classification, semantic routing, evidence sufficiency, and grounded answering; this favors inspectability and safety over minimum latency.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
