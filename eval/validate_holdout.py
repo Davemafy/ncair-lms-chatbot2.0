@@ -44,9 +44,7 @@ def validate_holdout_records(records: list[dict]) -> None:
     if len(questions) != len(set(questions)):
         errors.append("holdout questions must be unique")
 
-    frozen_questions = {
-        record["question"] for record in load_benchmark_records(BENCHMARK_PATH)
-    }
+    frozen_questions = {record["question"] for record in load_benchmark_records(BENCHMARK_PATH)}
     overlap = sorted(set(questions) & frozen_questions)
     if overlap:
         errors.append(f"holdout questions overlap frozen benchmark: {overlap!r}")
