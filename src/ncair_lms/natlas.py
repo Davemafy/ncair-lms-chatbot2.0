@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: SIM905
+
 import json
 import logging
 import re
@@ -483,7 +485,10 @@ class NatlasRouter:
                     {"role": "assistant", "content": raw},
                     {
                         "role": "user",
-                        "content": "Return only one valid JSON action using an exact allowed action value.",
+                        "content": (
+                            "Return only one valid JSON action using an exact allowed "
+                            "action value."
+                        ),
                     },
                 ],
                 max_new_tokens=50,
@@ -562,7 +567,10 @@ class NatlasEvidenceVerifier:
                 [
                     *messages,
                     {"role": "assistant", "content": raw},
-                    {"role": "user", "content": 'Return only {"supported":true} or {"supported":false}.'},
+                    {
+                        "role": "user",
+                        "content": 'Return only {"supported":true} or {"supported":false}.',
+                    },
                 ],
                 max_new_tokens=40,
             )
