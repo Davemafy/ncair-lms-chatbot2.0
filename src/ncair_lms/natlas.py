@@ -755,7 +755,7 @@ class NatlasEvidenceVerifier:
         raw = self._client.generate(messages, max_new_tokens=40)
         try:
             return _parse_supported(raw)
-        except InvalidModelOutputError as first_error:
+        except InvalidModelOutputError:
             LOGGER.warning("natlas_invalid_evidence_output raw=%r", raw[:1000])
             retry = self._client.generate(
                 [
