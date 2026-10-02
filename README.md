@@ -11,21 +11,24 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 ```mermaid
 flowchart LR
     A[User text] --> B[N-ATLaS language stage]
-    B --> C[N-ATLaS direct semantic router]
+    B --> B2[Orthographic consistency guard]
+    B2 --> C[N-ATLaS direct semantic router]
     C --> D{Selected tool}
-    D -->|knowledge| G[search_ncair_knowledge_base]
+    D -->|knowledge| Q[N-ATLaS canonical English query]
     D -->|portal or step| E[N-ATLaS tool-sufficiency check]
     E -->|sufficient| F[execute selected portal or step tool]
-    E -->|insufficient| Q[N-ATLaS English retrieval query]
-    Q --> G
+    E -->|insufficient| E2[N-ATLaS knowledge-required challenger]
+    E2 -->|no| F
+    E2 -->|yes| Q
+    Q --> G[search_ncair_knowledge_base]
     G --> H[FAISS / official NCAIR sources]
-    H --> I[N-ATLaS strongest-passage evidence check]
+    H --> I[Passage-wise extractive evidence verification]
     F --> J[N-ATLaS grounded response]
     I --> J
     J --> K[Answer in user's language]
 ```
 
-V2 keeps N-ATLaS as the assessed model while preserving the direct semantic router that performed best on explicit navigation and numbered-step requests. When that router selects a portal link or numbered step, a separate N-ATLaS sufficiency check asks whether executing that exact action would actually satisfy the user's requested outcome. If not, the request is escalated to knowledge search and N-ATLaS writes a concise English retrieval query for FAISS. Knowledge decisions skip the sufficiency check. Retrieved passages are not treated as support merely because similarity search returned them: N-ATLaS verifies the strongest passage before a grounded response is generated. No benchmark phrases or keyword rules are added to the runtime router. The sufficiency check is conditional, so requests routed directly to knowledge do not pay for an extra decision stage.
+V2 keeps N-ATLaS as the assessed model and makes the boundaries around it more deterministic. Language is still classified by N-ATLaS, with a conservative orthographic consistency guard that only overrides a conflicting label when one supported language has an unmistakable character pattern. Direct tool routing remains model-driven. A portal/step decision is escalated to knowledge only when both the sufficiency check and an independent knowledge-required challenger agree. Every knowledge request is normalized through a dedicated English-query stage before FAISS. Retrieved passages are verified independently, and a positive support verdict must include an exact excerpt copied from the passage. No benchmark questions, phrase tables, or benchmark-specific keywords are used at runtime.
 
 ### V1 — comparison baseline
 
@@ -151,7 +154,7 @@ make test-integration
 
 ## Benchmark
 
-The repository contains a frozen 60-question regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. After its results have been inspected, it must not be described as a blind or held-out final evaluation set. Use it to detect regressions and measure known failure classes; use a fresh unseen set for final unbiased evaluation.
+The repository contains two separate evaluation datasets. The original 60-question set is a frozen regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. Because its results have already been inspected, it is development/regression data rather than a blind final test. A separate 32-question multilingual holdout was added only after the deterministic-guard runtime was frozen. It has 8 questions per language arranged into 8 cross-language semantic groups and has no exact question overlap with the regression benchmark.
 
 Category totals:
 
@@ -163,10 +166,11 @@ Category totals:
 | trap | 12 |
 | undocumented | 8 |
 
-Validate the dataset without model inference:
+Validate both datasets without model inference:
 
 ```bash
 make benchmark-validate
+make holdout-validate
 ```
 
 Run routing comparisons:
@@ -174,6 +178,7 @@ Run routing comparisons:
 ```bash
 make benchmark-old
 make benchmark-new
+make holdout-new
 ```
 
 Run the full answer path when both model runtimes are available:
@@ -192,7 +197,7 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 ```text
 .
 ├── data/                         # official NCAIR source material
-├── eval/                         # held-out benchmark + evaluation code
+├── eval/                         # frozen regression + unseen holdout + evaluation code
 ├── src/
 │   └── ncair_lms/
 │       ├── api.py                # HTTP boundary
@@ -226,7 +231,7 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 The benchmark is data, not prompt material. Runtime prompts contain general contracts and enum constraints, not benchmark questions or phrase-specific routing rules.
 
-For each record the evaluator compares the selected tool, deterministic arguments, detected language, whether retrieved official evidence is sufficient, and failures. Cross-language consistency is measured only for records sharing a `semantic_key`. The frozen 60-case set is a regression suite; final reporting should use a separate unseen holdout after the implementation is frozen.
+For each record the evaluator compares the selected tool, deterministic arguments, detected language, whether retrieved official evidence is sufficient, and failures. Cross-language consistency is measured only for records sharing a `semantic_key`. The 60-case regression suite remains useful for known failure classes. The 32-case holdout is validated separately, rejects exact overlap with the regression questions, and is the dataset to use for the post-freeze generalization result.
 
 `routing` mode stops after tool execution. `full` mode additionally generates the answer.
 
@@ -247,5 +252,5 @@ The Python V2 is the source of truth for assignment evaluation.
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
 - FAISS uses an English embedding model, so V2 deliberately asks N-ATLaS for an English retrieval query before search.
-- V2 uses separate N-ATLaS calls for language classification, direct semantic routing, conditional tool sufficiency, evidence sufficiency, and grounded answering; factual questions initially mistaken for navigation may require one additional retrieval-query generation.
+- V2 uses separate N-ATLaS calls for language classification, direct semantic routing, canonical knowledge-query generation, conditional tool sufficiency, conservative escalation confirmation, extractive evidence verification, and grounded answering. This is intentionally more expensive than a one-shot router but makes failures easier to inspect and reduces single-call routing/evidence errors.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
