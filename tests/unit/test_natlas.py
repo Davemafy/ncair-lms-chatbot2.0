@@ -163,23 +163,27 @@ def test_router_retries_invalid_tool_json():
     assert len(client.generate_calls) == 2
 
 
-def test_evidence_verifier_accepts_exact_supported_quote():
-    evidence = "Attendance Threshold: A minimum of 75% attendance is required."
+def test_evidence_verifier_accepts_supported_passage_index():
+    evidence = (
+        "[ncair_knowledge_base.txt]\n"
+        "Attendance Threshold: A minimum of 75% attendance is required."
+    )
     client = FakeClient(
-        '{"verdict":"supported","evidence_quote":"A minimum of 75% attendance is required."}'
+        '{"verdict":"supported","passage_index":1}'
     )
     verifier = NatlasEvidenceVerifier(client)
 
     assert verifier.is_supported(question="What attendance is required?", evidence=evidence) is True
 
 
-def test_evidence_verifier_accepts_exact_contradiction_quote():
+def test_evidence_verifier_accepts_contradicted_passage_index():
     evidence = (
+        "[ncair_knowledge_base.txt]\n"
         "Returning interns do NOT need to onboard again. "
         "They should use their existing email and password."
     )
     client = FakeClient(
-        '{"verdict":"contradicted","evidence_quote":"do NOT need to onboard again"}'
+        '{"verdict":"contradicted","passage_index":1}'
     )
     verifier = NatlasEvidenceVerifier(client)
 
@@ -192,41 +196,42 @@ def test_evidence_verifier_accepts_exact_contradiction_quote():
     )
 
 
-def test_evidence_verifier_rejects_not_found():
-    client = FakeClient('{"verdict":"not_found","evidence_quote":""}')
+def test_evidence_verifier_rejects_not_found_with_null_index():
+    client = FakeClient('{"verdict":"not_found","passage_index":null}')
     verifier = NatlasEvidenceVerifier(client)
 
     assert (
         verifier.is_supported(
             question="What stipend is paid?",
-            evidence="Attendance must be at least 75%.",
+            evidence="[ncair_knowledge_base.txt]\nAttendance must be at least 75%.",
         )
         is False
     )
 
 
-def test_evidence_verifier_rejects_hallucinated_quote_after_retry():
+def test_evidence_verifier_rejects_out_of_range_index_after_retry():
+    evidence = (
+        "[ncair_knowledge_base.txt]\nAttendance must be at least 75%.\n\n"
+        "---\n\n"
+        "[ncair_knowledge_base.txt]\nRegistration closes at 5:00 PM."
+    )
     client = FakeClient(
-        '{"verdict":"supported","evidence_quote":"Interns receive a stipend."}',
-        '{"verdict":"supported","evidence_quote":"Interns receive a stipend."}',
+        '{"verdict":"supported","passage_index":7}',
+        '{"verdict":"supported","passage_index":9}',
     )
     verifier = NatlasEvidenceVerifier(client)
 
-    assert (
-        verifier.is_supported(
-            question="What stipend is paid?",
-            evidence="Attendance must be at least 75%.",
-        )
-        is False
-    )
+    assert verifier.is_supported(question="What stipend is paid?", evidence=evidence) is False
     assert len(client.generate_calls) == 2
 
 
 def test_evidence_verifier_retries_invalid_shape():
-    evidence = "Registration closes at 5:00 PM."
+    evidence = (
+        "[ncair_knowledge_base.txt]\nRegistration closes at 5:00 PM."
+    )
     client = FakeClient(
         '{"supported":true}',
-        '{"verdict":"supported","evidence_quote":"Registration closes at 5:00 PM."}',
+        '{"verdict":"supported","passage_index":1}',
     )
     verifier = NatlasEvidenceVerifier(client)
 
@@ -237,4 +242,16 @@ def test_evidence_verifier_retries_invalid_shape():
         )
         is True
     )
+    assert len(client.generate_calls) == 2
+
+
+def test_evidence_verifier_rejects_not_found_with_non_null_index():
+    evidence = "[ncair_knowledge_base.txt]\nAttendance must be at least 75%."
+    client = FakeClient(
+        '{"verdict":"not_found","passage_index":1}',
+        '{"verdict":"not_found","passage_index":1}',
+    )
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(question="What stipend is paid?", evidence=evidence) is False
     assert len(client.generate_calls) == 2
