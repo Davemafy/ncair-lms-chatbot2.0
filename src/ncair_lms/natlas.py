@@ -269,9 +269,6 @@ def _json_object(raw: str) -> dict:
     return value
 
 
-
-
-
 _ORTHOGRAPHIC_LANGUAGE_MARKERS = {
     Language.HAUSA: frozenset({"ƙ", "ɗ", "ɓ", "ƴ", "ƙ".upper(), "ɗ".upper(), "ɓ".upper()}),
     Language.YORUBA: frozenset({"ṣ", "Ṣ", "ẹ", "Ẹ"}),
