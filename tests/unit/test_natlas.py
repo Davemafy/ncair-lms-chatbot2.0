@@ -3,177 +3,168 @@ import pytest
 from ncair_lms.errors import InvalidModelOutputError
 from ncair_lms.models import Language, PortalAction, ToolName
 from ncair_lms.natlas import (
+    NatlasEvidenceVerifier,
     NatlasLanguageDetector,
     NatlasRouter,
-    OutcomeKind,
-    PageLabel,
-    StepLabel,
-    _orthographic_language_hint,
+    _explicit_portal_action,
+    _explicit_step,
+    _has_navigation_intent,
+    _language_hint,
 )
 
 
 class FakeClient:
-    def __init__(self, *choices):
-        self.choices = list(choices)
-        self.choose_calls = []
+    def __init__(self, *responses):
+        self.responses = list(responses)
         self.generate_calls = []
-
-    def choose(self, messages, choices):
-        self.choose_calls.append((messages, tuple(choices)))
-        if not self.choices:
-            raise AssertionError("FakeClient has no classification choice left.")
-        return self.choices.pop(0)
 
     def generate(self, messages, *, max_new_tokens):
         self.generate_calls.append((messages, max_new_tokens))
-        return "grounded answer"
-
-
-def test_language_detector_maps_closed_choice_without_generation():
-    client = FakeClient("Igbo")
-    detector = NatlasLanguageDetector(client)
-
-    assert detector.detect("Biko nyere m aka.") is Language.IGBO
-    assert len(client.choose_calls) == 1
-    assert client.generate_calls == []
-
-
-def test_language_detector_rejects_unknown_choice():
-    client = FakeClient("Swahili")
-    detector = NatlasLanguageDetector(client)
-
-    with pytest.raises(InvalidModelOutputError):
-        detector.detect("hello")
+        if not self.responses:
+            raise AssertionError("FakeClient has no response left.")
+        return self.responses.pop(0)
 
 
 @pytest.mark.parametrize(
     ("question", "expected"),
     [
-        ("Buɗe min shafin rajista.", Language.HAUSA),
-        ("Ṣí ojú-ìwé fún mi.", Language.YORUBA),
+        ("Where can I open the LMS?", Language.ENGLISH),
+        ("Ina zan shiga LMS dina?", Language.HAUSA),
+        ("Ṣí ojú ìwé LMS fún mi.", Language.YORUBA),
         ("Gịnị ka m ga-eme ugbu a?", Language.IGBO),
     ],
 )
-def test_distinctive_orthography_can_reconcile_language(question, expected):
-    client = FakeClient("English")
+def test_language_hint_uses_general_language_signals(question, expected):
+    language, margin = _language_hint(question)
+    assert language is expected
+    assert margin > 0
+
+
+def test_language_detector_uses_model_when_hint_is_ambiguous():
+    client = FakeClient('{"language":"english"}')
     detector = NatlasLanguageDetector(client)
 
-    assert detector.detect(question) is expected
+    assert detector.detect("Explain step 4 to me.") is Language.ENGLISH
+    assert len(client.generate_calls) == 1
 
 
-def test_orthographic_hint_ignores_non_distinctive_shared_characters():
-    assert _orthographic_language_hint("Ọ nọ?") is None
+def test_language_detector_reconciles_model_with_clear_lexical_signal():
+    client = FakeClient('{"language":"english"}')
+    detector = NatlasLanguageDetector(client)
+
+    assert detector.detect("Wane irin abu nake bukata?") is Language.HAUSA
 
 
-def test_router_maps_navigation_to_canonical_portal_action():
-    client = FakeClient(
-        "English",
-        OutcomeKind.NAVIGATION.value,
-        PageLabel.SIGN_IN.value,
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Take me to the sign-in page.")
-
-    assert decision.language is Language.ENGLISH
-    assert decision.tool is ToolName.PORTAL_LINK
-    assert decision.action is PortalAction.LOGIN
-    assert decision.step is None
-    assert decision.retrieval_query is None
-    assert client.generate_calls == []
-
-
-def test_router_maps_numbered_step_deterministically():
-    client = FakeClient(
-        "Yoruba",
-        OutcomeKind.STEP_GUIDANCE.value,
-        StepLabel.STEP_4.value,
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Ṣàlàyé ìgbésẹ̀ mẹ́rin.")
-
-    assert decision.language is Language.YORUBA
-    assert decision.tool is ToolName.STEP_GUIDANCE
-    assert decision.step == 4
-    assert decision.action is None
-
-
-def test_router_uses_original_question_for_knowledge_retrieval():
-    question = "Kedu iwu banyere ndebanye aha?"
-    client = FakeClient("Igbo", OutcomeKind.KNOWLEDGE.value)
-    router = NatlasRouter(client)
-
-    decision = router.route(question)
-
-    assert decision.language is Language.IGBO
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == question
-    assert decision.action is None
-    assert decision.step is None
-    assert len(client.choose_calls) == 2
-
-
-@pytest.mark.parametrize(
-    ("page", "action"),
-    [
-        (PageLabel.LMS_HOME, PortalAction.MAIN),
-        (PageLabel.SIGN_IN, PortalAction.LOGIN),
-        (PageLabel.NCAIR_HOME, PortalAction.NCAIR_HOME),
-        (PageLabel.REGISTER, PortalAction.REGISTER),
-        (PageLabel.PROFILE, PortalAction.PROFILE),
-        (PageLabel.COURSES, PortalAction.COURSES),
-        (PageLabel.TRACK_SELECTION, PortalAction.TRACK_SELECTION),
-        (PageLabel.SUPPORT, PortalAction.SUPPORT),
-    ],
-)
-def test_page_labels_have_deterministic_actions(page, action):
-    client = FakeClient("English", OutcomeKind.NAVIGATION.value, page.value)
-    router = NatlasRouter(client)
-
-    decision = router.route("generic navigation request")
-
-    assert decision.tool is ToolName.PORTAL_LINK
-    assert decision.action is action
-
-
-@pytest.mark.parametrize(
-    ("step_label", "step_number"),
-    [
-        (StepLabel.STEP_1, 1),
-        (StepLabel.STEP_2, 2),
-        (StepLabel.STEP_3, 3),
-        (StepLabel.STEP_4, 4),
-    ],
-)
-def test_step_labels_have_deterministic_numbers(step_label, step_number):
-    client = FakeClient("English", OutcomeKind.STEP_GUIDANCE.value, step_label.value)
-    router = NatlasRouter(client)
-
-    decision = router.route("generic step request")
-
-    assert decision.tool is ToolName.STEP_GUIDANCE
-    assert decision.step == step_number
-
-
-def test_router_rejects_unknown_outcome_choice():
-    client = FakeClient("English", "something else")
-    router = NatlasRouter(client)
+def test_language_detector_rejects_unknown_model_label():
+    client = FakeClient('{"language":"swahili"}', '{"language":"swahili"}')
+    detector = NatlasLanguageDetector(client)
 
     with pytest.raises(InvalidModelOutputError):
-        router.route("generic request")
+        detector.detect("neutral")
 
 
-def test_router_uses_hierarchical_semantic_choice_sets():
+@pytest.mark.parametrize(
+    ("question", "step"),
+    [
+        ("Show onboarding step 1.", 1),
+        ("Me zan yi a mataki na 2?", 2),
+        ("Ṣàlàyé ìgbésẹ̀ 3.", 3),
+        ("Kọwaa step 4.", 4),
+    ],
+)
+def test_explicit_step_extraction_is_structural(question, step):
+    assert _explicit_step(question) == step
+
+
+@pytest.mark.parametrize(
+    ("question", "action"),
+    [
+        ("Open the LMS sign in page.", PortalAction.LOGIN),
+        ("Buɗe min shafin zaɓen track.", PortalAction.TRACK_SELECTION),
+        ("Ṣí ojú ìwé profile fún mi.", PortalAction.PROFILE),
+        ("Meghee peeji ndebanye aha LMS.", PortalAction.REGISTER),
+    ],
+)
+def test_portal_resolution_uses_destination_vocabulary(question, action):
+    assert _has_navigation_intent(question)
+    assert _explicit_portal_action(question) is action
+
+
+def test_factual_login_question_is_not_navigation_intent():
+    question = "Which credentials should a returning intern use to sign in?"
+    assert not _has_navigation_intent(question)
+
+
+def test_router_canonicalizes_explicit_step_even_if_model_misroutes():
     client = FakeClient(
-        "English",
-        OutcomeKind.NAVIGATION.value,
-        PageLabel.COURSES.value,
+        '{"language":"english"}',
+        '{"tool":"get_portal_link"}',
     )
     router = NatlasRouter(client)
 
-    router.route("Open my courses.")
+    decision = router.route("Explain step 3 to me.")
 
-    assert client.choose_calls[0][1] == ("English", "Hausa", "Yoruba", "Igbo")
-    assert client.choose_calls[1][1] == tuple(kind.value for kind in OutcomeKind)
-    assert client.choose_calls[2][1] == tuple(label.value for label in PageLabel)
+    assert decision.tool is ToolName.STEP_GUIDANCE
+    assert decision.step == 3
+
+
+def test_router_canonicalizes_explicit_navigation_even_if_model_misroutes():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"tool":"search_ncair_knowledge_base"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("Open the courses page for me.")
+
+    assert decision.tool is ToolName.PORTAL_LINK
+    assert decision.action is PortalAction.COURSES
+
+
+def test_router_rejects_specialized_tool_without_contract_precondition():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"tool":"get_portal_link"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("What are the registration requirements?")
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == "What are the registration requirements?"
+
+
+def test_router_keeps_original_multilingual_question_for_knowledge():
+    client = FakeClient(
+        '{"language":"igbo"}',
+        '{"tool":"search_ncair_knowledge_base"}',
+    )
+    router = NatlasRouter(client)
+
+    question = "Kedu iwu maka password LMS?"
+    decision = router.route(question)
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == question
+
+
+def test_router_retries_invalid_tool_json():
+    client = FakeClient(
+        '{"language":"english"}',
+        '{"tool":"not_real"}',
+        '{"tool":"search_ncair_knowledge_base"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("What is the attendance rule?")
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert len(client.generate_calls) == 3
+
+
+def test_evidence_verifier_requires_boolean():
+    client = FakeClient('{"supported":"yes"}', '{"supported":true}')
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(question="Q", evidence="E") is True
+    assert len(client.generate_calls) == 2
