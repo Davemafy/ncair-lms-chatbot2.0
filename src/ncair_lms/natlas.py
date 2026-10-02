@@ -84,6 +84,103 @@ _ROUTE_CHOICES = tuple(label.value for label in RouteLabel)
 class NatlasClient(Protocol):
     def generate(self, messages: Sequence[dict[str, str]], *, max_new_tokens: int) -> str: ...
 
+    def choose(self, messages: Sequence[dict[str, str]], choices: Sequence[str]) -> str: ...
+
+
+class LocalNatlasClient:
+    """Lazy local adapter for NCAIR1/N-ATLaS.
+
+    Generation is used only for the final grounded answer. Language and routing are closed-set
+    classifications computed from candidate-token likelihoods, so invalid JSON/tool outputs are
+    impossible.
+    """
+
+    def __init__(self, settings: Settings):
+        self._settings = settings
+        self._tokenizer = None
+        self._model = None
+
+    def _ensure_loaded(self) -> None:
+        if self._tokenizer is not None and self._model is not None:
+            return
+
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        except ImportError as exc:
+            raise ModelUnavailableError(
+                "N-ATLaS requires transformers, accelerate, and torch. "
+                "Install the runtime dependencies first."
+            ) from exc
+
+        kwargs = {"device_map": self._settings.natlas_device, "torch_dtype": "auto"}
+        if self._settings.natlas_quantization == "4bit":
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            kwargs["torch_dtype"] = torch.float16
+        if self._settings.hf_token:
+            kwargs["token"] = self._settings.hf_token
+
+        LOGGER.info(
+            "loading_natlas model=%s quantization=%s",
+            self._settings.natlas_model,
+            self._settings.natlas_quantization,
+        )
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                self._settings.natlas_model,
+                token=self._settings.hf_token,
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                self._settings.natlas_model,
+                **kwargs,
+            )
+            model.eval()
+        except Exception as exc:
+            raise ModelUnavailableError(
+                f"Could not load N-ATLaS model {self._settings.natlas_model!r}."
+            ) from exc
+
+        self._tokenizer = tokenizer
+        self._model = model
+
+    def _chat_prompt(self, messages: Sequence[dict[str, str]]) -> str:
+        assert self._tokenizer is not None
+        return self._tokenizer.apply_chat_template(
+            list(messages),
+            add_generation_prompt=True,
+            tokenize=False,
+            date_string=datetime.now().strftime("%d %b %Y"),
+        )
+
+    def generate(self, messages: Sequence[dict[str, str]], *, max_new_tokens: int) -> str:
+        self._ensure_loaded()
+        assert self._tokenizer is not None
+        assert self._model is not None
+
+        try:
+            prompt = self._chat_prompt(messages)
+            inputs = self._tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+            model_device = next(self._model.parameters()).device
+            inputs = {name: value.to(model_device) for name, value in inputs.items()}
+            prompt_length = inputs["input_ids"].shape[-1]
+
+            output = self._model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                use_cache=True,
+                repetition_penalty=1.05,
+            )
+            generated = output[0][prompt_length:]
+            return self._tokenizer.decode(generated, skip_special_tokens=True).strip()
+        except Exception as exc:
+            raise ModelUnavailableError("N-ATLaS inference failed.") from exc
+
     def choose(self, messages: Sequence[dict[str, str]], choices: Sequence[str]) -> str:
         """Return the highest-likelihood allowed semantic continuation.
 
@@ -128,13 +225,11 @@ class NatlasClient(Protocol):
 
             model_device = next(self._model.parameters()).device
 
-            # Fast path: semantic labels such as "english", "login", and "knowledge" are
-            # typically one token for the N-ATLaS tokenizer. Their ranking only needs the
+            # Common semantic labels usually tokenize to one token. Their ranking only needs the
             # next-token logits after the shared prompt, so the prompt is evaluated once.
             if all(len(token_ids) == 1 for token_ids in choice_ids):
                 inputs = {
-                    name: value.to(model_device)
-                    for name, value in prompt_inputs.items()
+                    name: value.to(model_device) for name, value in prompt_inputs.items()
                 }
                 with torch.no_grad():
                     try:
