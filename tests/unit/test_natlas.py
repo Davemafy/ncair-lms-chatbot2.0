@@ -150,7 +150,6 @@ def test_router_keeps_original_multilingual_question_for_knowledge():
 
 def test_router_retries_invalid_tool_json():
     client = FakeClient(
-        '{"language":"english"}',
         '{"tool":"not_real"}',
         '{"tool":"search_ncair_knowledge_base"}',
     )
@@ -159,7 +158,7 @@ def test_router_retries_invalid_tool_json():
     decision = router.route("What is the attendance rule?")
 
     assert decision.tool is ToolName.KNOWLEDGE
-    assert len(client.generate_calls) == 3
+    assert len(client.generate_calls) == 2
 
 
 def test_evidence_verifier_requires_boolean():
