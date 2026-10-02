@@ -151,7 +151,7 @@ make test-integration
 
 ## Benchmark
 
-The repository contains a frozen 60-question regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. After its results have been inspected, it must not be described as a blind or held-out final evaluation set. Use it to detect regressions and measure known failure classes; use a fresh unseen set for final unbiased evaluation.
+The repository contains a frozen 60-question regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. After its results have been inspected, it must not be described as a blind or held-out final evaluation set. The additional `eval/dev_multilingual.jsonl` file contains the previously inspected 32-case multilingual set from the deterministic-guard experiment; it is also development data. Use both to diagnose known failure classes, then freeze implementation and create a fresh unseen set for final unbiased evaluation.
 
 Category totals:
 
@@ -174,6 +174,7 @@ Run routing comparisons:
 ```bash
 make benchmark-old
 make benchmark-new
+make benchmark-dev
 ```
 
 Run the full answer path when both model runtimes are available:
@@ -224,7 +225,7 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 ## Evaluation methodology
 
-The benchmark is data, not prompt material. Runtime prompts contain general contracts and enum constraints, not benchmark questions or phrase-specific routing rules.
+Evaluation data is not prompt material. Runtime classification descriptions contain only the route taxonomy and general decision boundaries, not benchmark questions or phrase-specific rules.
 
 For each record the evaluator compares the selected tool, deterministic arguments, detected language, whether retrieved official evidence is sufficient, and failures. Cross-language consistency is measured only for records sharing a `semantic_key`. The frozen 60-case set is a regression suite; final reporting should use a separate unseen holdout after the implementation is frozen.
 
