@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# ruff: noqa: SIM905
 
 import json
 import logging
@@ -58,22 +57,22 @@ _LANGUAGE_LEXICON = {
     Language.ENGLISH: frozenset(
         "where what how when which who why do does did should can could would need open show take "
         "go visit page link website sign login home my the is are list official happens explain "
-        "right from only use after before".split()
+        "right from only use after before".split()  # noqa: SIM905
     ),
     Language.HAUSA: frozenset(
         "ina zan shiga bude buɗe min shafi shafin zaben zaɓen son me yi mataki ka bayyana kashi "
         "nawa nake bukata buƙata domin wuce wane irin idan hakan nufi ake bayarwa matsayin menene "
-        "dole ko karfe akwai sabon sabo daga amma ba sai dina yake suke wajen".split()
+        "dole ko karfe akwai sabon sabo daga amma ba sai dina yake suke wajen".split()  # noqa: SIM905
     ),
     Language.YORUBA: frozenset(
         "níbo nibo mo ti lè le wọlé ṣí si ojú oju ìwé iwe fún fun kí ki ni gbọdọ gbọdọ̀ ṣe "
         "ìgbésẹ̀ igbesẹ ṣàlàyé salaye igba melo báwo bawo kini ilana ọsẹ ose mi abi ọjọ ojo wo "
-        "àwọn awon máa maa jẹ je lọ lo hàn han".split()
+        "àwọn awon máa maa jẹ je lọ lo hàn han".split()  # noqa: SIM905
     ),
     Language.IGBO: frozenset(
         "ebee ebe ka ga abanye banye meghee peeji gịnị gini kọwaa kowaa kedu iwu maka ole achọrọ "
         "achoro enwere nke ahụ ahu ọhụrụ ohuru bụ bu ọ bụrụ o bụrụ bụrụ gi gị mee ndị ndi enye "
-        "efu nọ no".split()
+        "efu nọ no".split()  # noqa: SIM905
     ),
 }
 
