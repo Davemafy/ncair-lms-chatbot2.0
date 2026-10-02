@@ -53,7 +53,7 @@ class Settings:
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     reranker_device: str = "cpu"
     rerank_candidates: int = 64
-    rerank_min_score: float = 0.50
+    rerank_min_score: float = 0.03
     rerank_min_margin: float = 0.0
     allowed_origins: tuple[str, ...] = ()
 
@@ -88,7 +88,7 @@ class Settings:
             reranker_model=os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip(),
             reranker_device=os.getenv("RERANKER_DEVICE", "cpu").strip(),
             rerank_candidates=_positive_int("RERANK_CANDIDATES", 64),
-            rerank_min_score=_unit_interval_float("RERANK_MIN_SCORE", 0.50),
+            rerank_min_score=_unit_interval_float("RERANK_MIN_SCORE", 0.03),
             rerank_min_margin=_unit_interval_float("RERANK_MIN_MARGIN", 0.0),
             allowed_origins=tuple(
                 origin.strip()

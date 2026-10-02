@@ -3,7 +3,7 @@ import os
 import pytest
 
 from ncair_lms.config import Settings
-from ncair_lms.models import ToolName
+from ncair_lms.models import Language, ToolName
 from ncair_lms.natlas import LocalNatlasClient, NatlasRouter
 
 pytestmark = pytest.mark.integration
@@ -17,4 +17,5 @@ def test_real_natlas_routes_a_hausa_login_request():
     settings = Settings.from_env()
     router = NatlasRouter(LocalNatlasClient(settings))
     decision = router.route("Ina zan shiga LMS dina?")
+    assert decision.language is Language.HAUSA
     assert decision.tool is ToolName.PORTAL_LINK

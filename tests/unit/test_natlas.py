@@ -23,7 +23,7 @@ class FakeClient:
 
 
 def test_language_detector_maps_closed_choice_without_generation():
-    client = FakeClient("D")
+    client = FakeClient("igbo")
     detector = NatlasLanguageDetector(client)
 
     assert detector.detect("Biko nyere m aka.") is Language.IGBO
@@ -32,7 +32,7 @@ def test_language_detector_maps_closed_choice_without_generation():
 
 
 def test_language_detector_rejects_unknown_choice():
-    client = FakeClient("Z")
+    client = FakeClient("swahili")
     detector = NatlasLanguageDetector(client)
 
     with pytest.raises(InvalidModelOutputError):
@@ -40,7 +40,7 @@ def test_language_detector_rejects_unknown_choice():
 
 
 def test_router_maps_signin_class_to_canonical_portal_action():
-    client = FakeClient("A", RouteLabel.SIGN_IN.value)
+    client = FakeClient("english", RouteLabel.SIGN_IN.value)
     router = NatlasRouter(client)
 
     decision = router.route("Take me to the sign-in page.")
@@ -54,7 +54,7 @@ def test_router_maps_signin_class_to_canonical_portal_action():
 
 
 def test_router_maps_numbered_step_class_deterministically():
-    client = FakeClient("C", RouteLabel.STEP_4.value)
+    client = FakeClient("yoruba", RouteLabel.STEP_4.value)
     router = NatlasRouter(client)
 
     decision = router.route("Ṣàlàyé ìgbésẹ̀ mẹ́rin.")
@@ -67,7 +67,7 @@ def test_router_maps_numbered_step_class_deterministically():
 
 def test_router_uses_original_multilingual_question_for_knowledge_retrieval():
     question = "Kedu iwu banyere ndebanye aha?"
-    client = FakeClient("D", RouteLabel.KNOWLEDGE.value)
+    client = FakeClient("igbo", RouteLabel.KNOWLEDGE.value)
     router = NatlasRouter(client)
 
     decision = router.route(question)
@@ -100,7 +100,7 @@ def test_router_uses_original_multilingual_question_for_knowledge_retrieval():
     ],
 )
 def test_route_labels_have_deterministic_arguments(label, tool, action, step):
-    client = FakeClient("B", label.value)
+    client = FakeClient("hausa", label.value)
     router = NatlasRouter(client)
 
     decision = router.route("generic request")
@@ -112,7 +112,7 @@ def test_route_labels_have_deterministic_arguments(label, tool, action, step):
 
 
 def test_router_rejects_unknown_route_choice():
-    client = FakeClient("A", "Z")
+    client = FakeClient("english", "not-a-route")
     router = NatlasRouter(client)
 
     with pytest.raises(InvalidModelOutputError):
@@ -120,12 +120,20 @@ def test_router_rejects_unknown_route_choice():
 
 
 def test_router_uses_exact_closed_choice_sets():
-    client = FakeClient("A", RouteLabel.KNOWLEDGE.value)
+    client = FakeClient("english", RouteLabel.KNOWLEDGE.value)
     router = NatlasRouter(client)
 
     router.route("Explain the policy.")
 
     language_choices = client.choose_calls[0][1]
     route_choices = client.choose_calls[1][1]
-    assert language_choices == ("A", "B", "C", "D")
+    assert language_choices == ("english", "hausa", "yoruba", "igbo")
     assert route_choices == tuple(label.value for label in RouteLabel)
+
+
+def test_route_labels_are_semantic_not_opaque_codes():
+    assert RouteLabel.LMS_HOME.value == "home"
+    assert RouteLabel.SIGN_IN.value == "login"
+    assert RouteLabel.STEP_4.value == "fourth"
+    assert RouteLabel.KNOWLEDGE.value == "knowledge"
+    assert all(len(label.value) > 1 for label in RouteLabel)

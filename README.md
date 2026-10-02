@@ -11,7 +11,7 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 ```mermaid
 flowchart LR
     A[User text] --> B[N-ATLaS 4-way language classifier]
-    B --> C[N-ATLaS 13-way closed-set route classifier]
+    B --> C[N-ATLaS semantic route labels]
     C --> D{Deterministic route mapping}
     D -->|portal| E[get_portal_link]
     D -->|step| F[get_step_guidance]
@@ -25,7 +25,7 @@ flowchart LR
     J --> L[Answer in user's language]
 ```
 
-V2 treats language and routing as closed-set classification instead of free-form tool generation. N-ATLaS scores only allowed choices: four language classes and thirteen mutually exclusive route classes. Route labels map deterministically to portal actions, step numbers, or knowledge search, so invalid JSON and argument drift are eliminated. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by calibrated reranker score/margin thresholds rather than a second generative evidence judge. N-ATLaS is used again only to verbalize verified evidence in the user's language.
+V2 treats language and routing as closed-set classification instead of free-form tool generation. N-ATLaS scores only allowed semantic labels: four language names and thirteen mutually exclusive route names. Route labels map deterministically to portal actions, step numbers, or knowledge search, so invalid JSON and argument drift are eliminated. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by calibrated reranker score/margin thresholds rather than a second generative evidence judge. N-ATLaS is used again only to verbalize verified evidence in the user's language.
 
 ### V1 — comparison baseline
 
@@ -68,7 +68,7 @@ python -m pip install -e ".[runtime,dev]"
 
 ## Configuration
 
-`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` minimum retrieval similarity, and the original Ollama V1 model. `HF_TOKEN` has no default secret value and is optional for public model access.
+`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` V1 retrieval similarity, a development-calibrated V2 reranker support threshold of `0.03`, and the original Ollama V1 model. `HF_TOKEN` has no default secret value and is optional for public model access.
 
 Environment files are never committed.
 
@@ -248,5 +248,5 @@ The Python V2 is the source of truth for assignment evaluation.
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
 - V1 still uses the original English MiniLM chunk index. V2 uses `intfloat/multilingual-e5-base` with the required query/passage prefixes, then `BAAI/bge-reranker-v2-m3` for multilingual reranking.
-- V2 route and language decisions are fixed-choice likelihood comparisons rather than generated JSON. Knowledge support is a calibrated reranker decision; `RERANK_MIN_SCORE` and `RERANK_MIN_MARGIN` should be calibrated on development data and frozen before final evaluation.
+- V2 route and language decisions are fixed-choice likelihood comparisons over semantic labels rather than generated JSON. Knowledge support is a calibrated reranker decision; `RERANK_MIN_SCORE` and `RERANK_MIN_MARGIN` should be calibrated on development data and frozen before final evaluation.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
