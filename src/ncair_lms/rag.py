@@ -405,7 +405,14 @@ class AtomicKnowledgeBase:
             EvidencePassage(
                 source=self._facts[index].source,
                 text=self._facts[index].text,
+                score=score,
             )
-            for _, index in ranked[:keep]
+            for score, index in ranked[:keep]
         )
-        return RetrievedEvidence(passages, support_verified=supported)
+        margin = scores[0] - scores[1] if len(scores) > 1 else None
+        return RetrievedEvidence(
+            passages,
+            support_verified=supported,
+            support_score=scores[0] if scores else None,
+            support_margin=margin,
+        )
