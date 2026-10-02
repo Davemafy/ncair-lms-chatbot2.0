@@ -165,12 +165,9 @@ def test_router_retries_invalid_tool_json():
 
 def test_evidence_verifier_accepts_supported_passage_index():
     evidence = (
-        "[ncair_knowledge_base.txt]\n"
-        "Attendance Threshold: A minimum of 75% attendance is required."
+        "[ncair_knowledge_base.txt]\nAttendance Threshold: A minimum of 75% attendance is required."
     )
-    client = FakeClient(
-        '{"verdict":"supported","passage_index":1}'
-    )
+    client = FakeClient('{"verdict":"supported","passage_index":1}')
     verifier = NatlasEvidenceVerifier(client)
 
     assert verifier.is_supported(question="What attendance is required?", evidence=evidence) is True
@@ -182,9 +179,7 @@ def test_evidence_verifier_accepts_contradicted_passage_index():
         "Returning interns do NOT need to onboard again. "
         "They should use their existing email and password."
     )
-    client = FakeClient(
-        '{"verdict":"contradicted","passage_index":1}'
-    )
+    client = FakeClient('{"verdict":"contradicted","passage_index":1}')
     verifier = NatlasEvidenceVerifier(client)
 
     assert (
@@ -226,9 +221,7 @@ def test_evidence_verifier_rejects_out_of_range_index_after_retry():
 
 
 def test_evidence_verifier_retries_invalid_shape():
-    evidence = (
-        "[ncair_knowledge_base.txt]\nRegistration closes at 5:00 PM."
-    )
+    evidence = "[ncair_knowledge_base.txt]\nRegistration closes at 5:00 PM."
     client = FakeClient(
         '{"supported":true}',
         '{"verdict":"supported","passage_index":1}',
