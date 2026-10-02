@@ -1,6 +1,6 @@
 PYTHON ?= python
 
-.PHONY: install install-dev test test-integration lint format benchmark-validate benchmark-old benchmark-new run-v1 run-v2 worker-test check
+.PHONY: install install-dev test test-integration lint format benchmark-validate benchmark-old benchmark-new benchmark-dev run-v1 run-v2 worker-test check
 
 install:
 	$(PYTHON) -m pip install -e ".[runtime]"
@@ -30,6 +30,9 @@ benchmark-old:
 
 benchmark-new:
 	$(PYTHON) -m eval.run_benchmark --version v2 --mode routing
+
+benchmark-dev:
+	$(PYTHON) -m eval.run_benchmark --version v2 --mode routing --dataset eval/dev_multilingual.jsonl
 
 run-v1:
 	NCAIR_DEFAULT_VERSION=v1 uvicorn ncair_lms.api:app --reload
