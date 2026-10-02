@@ -817,6 +817,10 @@ class NatlasEvidenceVerifier:
         self._client = client
 
     def _normalize_question(self, question: str) -> str:
+        language_hint, margin = _language_hint(question)
+        if language_hint is Language.ENGLISH and margin > 0:
+            return question
+
         messages = [
             {"role": "system", "content": EVIDENCE_QUERY_SYSTEM_PROMPT},
             {"role": "user", "content": question},
