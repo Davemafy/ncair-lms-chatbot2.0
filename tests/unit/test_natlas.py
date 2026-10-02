@@ -55,6 +55,14 @@ def test_language_detector_reconciles_model_with_clear_lexical_signal():
     assert detector.detect("Wane irin abu nake bukata?") is Language.HAUSA
 
 
+def test_language_detector_does_not_trust_single_borrowed_token():
+    client = FakeClient('{"language":"english"}')
+    detector = NatlasLanguageDetector(client)
+
+    assert detector.detect("Walk me through onboarding stage three.") is Language.ENGLISH
+    assert len(client.generate_calls) == 1
+
+
 def test_language_detector_rejects_unknown_model_label():
     client = FakeClient('{"language":"swahili"}', '{"language":"swahili"}')
     detector = NatlasLanguageDetector(client)
