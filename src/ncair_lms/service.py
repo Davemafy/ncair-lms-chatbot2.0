@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import Protocol
 
 import requests
 
 from .config import Settings
 from .models import AssistantResponse, Language, RoutingDecision, ToolName, ToolResult
-from .natlas import LocalNatlasClient, NatlasEvidenceVerifier, NatlasGroundedAnswerer, NatlasRouter
-from .rag import KnowledgeBase
+from .natlas import LocalNatlasClient, NatlasGroundedAnswerer, NatlasRouter
+from .rag import AtomicKnowledgeBase, KnowledgeBase
 from .tools import execute_tool
 from .v1_router import V1KeywordRouter
 
@@ -43,8 +42,8 @@ class GroundedAnswerer(Protocol):
     def answer(self, *, question: str, language: Language, evidence: str) -> str: ...
 
 
-class EvidenceVerifier(Protocol):
-    def is_supported(self, *, question: str, evidence: str) -> bool: ...
+class KnowledgeSearcher(Protocol):
+    def search(self, query: str, *, top_k: int): ...
 
 
 class OllamaAnswerer:
@@ -82,24 +81,38 @@ class AssistantService:
         version: str,
         *,
         settings: Settings | None = None,
-        knowledge_base: KnowledgeBase | None = None,
+        knowledge_base: KnowledgeSearcher | None = None,
         router: Router | None = None,
         answerer: GroundedAnswerer | None = None,
-        verifier: EvidenceVerifier | None = None,
     ):
         if version not in {"v1", "v2"}:
             raise ValueError("version must be 'v1' or 'v2'.")
 
         self.version = version
         self.settings = settings or Settings.from_env()
-        self.knowledge_base = knowledge_base or KnowledgeBase(
-            self.settings.data_dir,
-            min_score=self.settings.min_retrieval_score,
-            embedding_device=self.settings.embedding_device,
-        )
+
+        if knowledge_base is not None:
+            self.knowledge_base = knowledge_base
+        elif version == "v1":
+            self.knowledge_base = KnowledgeBase(
+                self.settings.data_dir,
+                min_score=self.settings.min_retrieval_score,
+                embedding_device=self.settings.embedding_device,
+            )
+        else:
+            self.knowledge_base = AtomicKnowledgeBase(
+                self.settings.data_dir,
+                embedding_model=self.settings.v2_embedding_model,
+                embedding_device=self.settings.embedding_device,
+                reranker_model=self.settings.reranker_model,
+                reranker_device=self.settings.reranker_device,
+                candidate_k=self.settings.rerank_candidates,
+                min_score=self.settings.rerank_min_score,
+                min_margin=self.settings.rerank_min_margin,
+            )
 
         natlas_client = None
-        if version == "v2" and (router is None or answerer is None or verifier is None):
+        if version == "v2" and (router is None or answerer is None):
             natlas_client = LocalNatlasClient(self.settings)
 
         if router is not None:
@@ -118,14 +131,6 @@ class AssistantService:
             assert natlas_client is not None
             self.answerer = NatlasGroundedAnswerer(natlas_client, self.settings)
 
-        if version == "v1":
-            self.verifier = None
-        elif verifier is not None:
-            self.verifier = verifier
-        else:
-            assert natlas_client is not None
-            self.verifier = NatlasEvidenceVerifier(natlas_client)
-
     def route(self, question: str) -> RoutingDecision:
         decision = self.router.route(question)
         LOGGER.info(
@@ -137,40 +142,13 @@ class AssistantService:
         return decision
 
     def execute(self, decision: RoutingDecision, *, question: str | None = None) -> ToolResult:
-        result = execute_tool(
+        del question
+        return execute_tool(
             decision,
             self.knowledge_base,
             top_k=self.settings.top_k,
             allow_full_step_sequence=self.version == "v1",
         )
-
-        if (
-            self.version == "v2"
-            and decision.tool is ToolName.KNOWLEDGE
-            and result.evidence.passages
-        ):
-            assert self.verifier is not None
-            verifier_question = decision.retrieval_query or question or ""
-            strongest_passage = result.evidence.passages[0]
-            verifier_evidence = f"[{strongest_passage.citation}]\n{strongest_passage.text.strip()}"
-            supported = self.verifier.is_supported(
-                question=verifier_question,
-                evidence=verifier_evidence,
-            )
-            LOGGER.info(
-                "evidence_verdict version=%s supported=%s passages=%d source=%r query=%r",
-                self.version,
-                supported,
-                len(result.evidence.passages),
-                strongest_passage.citation,
-                verifier_question,
-            )
-            result = ToolResult(
-                answer=result.answer,
-                evidence=replace(result.evidence, support_verified=supported),
-            )
-
-        return result
 
     def respond(
         self,
