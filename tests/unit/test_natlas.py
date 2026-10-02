@@ -83,6 +83,8 @@ def test_explicit_step_extraction_is_structural(question, step):
         ("Buɗe min shafin zaɓen track.", PortalAction.TRACK_SELECTION),
         ("Ṣí ojú ìwé profile fún mi.", PortalAction.PROFILE),
         ("Meghee peeji ndebanye aha LMS.", PortalAction.REGISTER),
+        ("Open NCAIR's official website.", PortalAction.NCAIR_HOME),
+        ("Visit the official website of NCAIR.", PortalAction.NCAIR_HOME),
     ],
 )
 def test_portal_resolution_uses_destination_vocabulary(question, action):
@@ -161,9 +163,66 @@ def test_router_retries_invalid_tool_json():
     assert len(client.generate_calls) == 2
 
 
-def test_evidence_verifier_requires_boolean():
-    client = FakeClient('{"supported":"yes"}', '{"supported":true}')
+def test_evidence_verifier_accepts_exact_supported_quote():
+    evidence = "Attendance Threshold: A minimum of 75% attendance is required."
+    client = FakeClient(
+        '{"verdict":"supported","evidence_quote":"A minimum of 75% attendance is required."}'
+    )
     verifier = NatlasEvidenceVerifier(client)
 
-    assert verifier.is_supported(question="Q", evidence="E") is True
+    assert verifier.is_supported(question="What attendance is required?", evidence=evidence) is True
+
+
+def test_evidence_verifier_accepts_exact_contradiction_quote():
+    evidence = (
+        "Returning interns do NOT need to onboard again. "
+        "They should use their existing email and password."
+    )
+    client = FakeClient(
+        '{"verdict":"contradicted","evidence_quote":"do NOT need to onboard again"}'
+    )
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(
+        question="Returning interns must onboard again, right?",
+        evidence=evidence,
+    ) is True
+
+
+def test_evidence_verifier_rejects_not_found():
+    client = FakeClient('{"verdict":"not_found","evidence_quote":""}')
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(
+        question="What stipend is paid?",
+        evidence="Attendance must be at least 75%.",
+    ) is False
+
+
+def test_evidence_verifier_rejects_hallucinated_quote_after_retry():
+    client = FakeClient(
+        '{"verdict":"supported","evidence_quote":"Interns receive a stipend."}',
+        '{"verdict":"supported","evidence_quote":"Interns receive a stipend."}',
+    )
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(
+        question="What stipend is paid?",
+        evidence="Attendance must be at least 75%.",
+    ) is False
+    assert len(client.generate_calls) == 2
+
+
+def test_evidence_verifier_retries_invalid_shape():
+    evidence = "Registration closes at 5:00 PM."
+    client = FakeClient(
+        '{"supported":true}',
+        '{"verdict":"supported","evidence_quote":"Registration closes at 5:00 PM."}',
+    )
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(
+        question="When does registration close?",
+        evidence=evidence,
+    ) is True
     assert len(client.generate_calls) == 2
