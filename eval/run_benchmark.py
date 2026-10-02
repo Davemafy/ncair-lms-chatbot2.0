@@ -45,6 +45,8 @@ def run(version: str, mode: str) -> dict:
             "actual_args": None,
             "argument_correct": False,
             "supported_actual": None,
+            "support_score": None,
+            "support_margin": None,
             "evidence_terms_found": False,
             "answer": None,
             "failure": False,
@@ -61,6 +63,8 @@ def run(version: str, mode: str) -> dict:
             result["actual_args"] = _actual_args(decision)
             result["argument_correct"] = _argument_correct(record, result["actual_args"])
             result["supported_actual"] = tool_result.evidence.supported
+            result["support_score"] = tool_result.evidence.support_score
+            result["support_margin"] = tool_result.evidence.support_margin
             result["evidence_terms_found"] = all(
                 term.lower() in evidence for term in record["expected_evidence_terms"]
             )
