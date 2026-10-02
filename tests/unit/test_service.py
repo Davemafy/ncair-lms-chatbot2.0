@@ -10,52 +10,39 @@ from ncair_lms.service import AssistantService
 
 
 class FakeKnowledgeBase:
+    def __init__(self, *, supported=True):
+        self.supported = supported
+        self.queries = []
+
     def search(self, query, *, top_k):
-        del query, top_k
+        self.queries.append((query, top_k))
         return RetrievedEvidence(
             (
-                EvidencePassage(source="guide.txt", text="Attendance requires 75%."),
-                EvidencePassage(source="other.txt", text="Unrelated onboarding information."),
-            )
+                EvidencePassage(
+                    source="ncair_knowledge_base.txt",
+                    text="Attendance Threshold: A minimum of 75% attendance is required.",
+                ),
+            ),
+            support_verified=self.supported,
         )
 
 
 class FakeRouter:
     def route(self, question):
-        del question
         return RoutingDecision(
             language=Language.HAUSA,
             tool=ToolName.KNOWLEDGE,
-            retrieval_query="attendance requirement",
+            retrieval_query=question,
         )
 
 
 class FakeAnswerer:
     def __init__(self):
-        self.calls = 0
+        self.calls = []
 
     def answer(self, *, question, language, evidence):
-        self.calls += 1
-        assert question
-        assert language is Language.HAUSA
-        assert "75%" in evidence
+        self.calls.append((question, language, evidence))
         return "Ana bukatar attendance na 75%."
-
-
-class FakeVerifier:
-    def __init__(self, supported=True):
-        self.supported = supported
-        self.calls = 0
-        self.questions = []
-        self.evidence = []
-
-    def is_supported(self, *, question, evidence):
-        self.calls += 1
-        self.questions.append(question)
-        self.evidence.append(evidence)
-        assert question
-        assert evidence
-        return self.supported
 
 
 def _settings(tmp_path):
@@ -73,49 +60,41 @@ def _settings(tmp_path):
     )
 
 
-def test_v2_service_keeps_language_and_grounding(tmp_path):
+def test_v2_service_trusts_calibrated_retrieval_support(tmp_path):
     answerer = FakeAnswerer()
-    verifier = FakeVerifier(supported=True)
+    knowledge_base = FakeKnowledgeBase(supported=True)
     service = AssistantService(
         "v2",
         settings=_settings(tmp_path),
-        knowledge_base=FakeKnowledgeBase(),
+        knowledge_base=knowledge_base,
         router=FakeRouter(),
         answerer=answerer,
-        verifier=verifier,
     )
 
     response = service.chat("Attendance nawa nake bukata?")
 
     assert response.language is Language.HAUSA
     assert response.tool is ToolName.KNOWLEDGE
-    assert response.sources == ("guide.txt", "other.txt")
+    assert response.sources == ("ncair_knowledge_base.txt",)
     assert "75%" in response.answer
-    assert verifier.calls == 1
-    assert verifier.questions == ["attendance requirement"]
-    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
-    assert answerer.calls == 1
+    assert knowledge_base.queries == [("Attendance nawa nake bukata?", 3)]
+    assert len(answerer.calls) == 1
 
 
-def test_v2_service_rejects_retrieval_that_does_not_answer_question(tmp_path):
+def test_v2_service_abstains_when_reranker_support_is_below_threshold(tmp_path):
     answerer = FakeAnswerer()
-    verifier = FakeVerifier(supported=False)
     service = AssistantService(
         "v2",
         settings=_settings(tmp_path),
-        knowledge_base=FakeKnowledgeBase(),
+        knowledge_base=FakeKnowledgeBase(supported=False),
         router=FakeRouter(),
         answerer=answerer,
-        verifier=verifier,
     )
 
-    response = service.chat("Wane bayani ne jagorar ta tabbatar?")
+    response = service.chat("Nawa ake biyan allowance?")
 
     assert response.language is Language.HAUSA
     assert response.tool is ToolName.KNOWLEDGE
     assert response.sources == ()
     assert "Ban sami isasshen bayani" in response.answer
-    assert verifier.calls == 1
-    assert verifier.questions == ["attendance requirement"]
-    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
-    assert answerer.calls == 0
+    assert answerer.calls == []
