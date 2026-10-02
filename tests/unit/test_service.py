@@ -45,6 +45,16 @@ class FakeAnswerer:
         return "Ana bukatar attendance na 75%."
 
 
+class FakeVerifier:
+    def __init__(self, supported):
+        self.supported = supported
+        self.calls = []
+
+    def is_supported(self, *, question, evidence):
+        self.calls.append((question, evidence))
+        return self.supported
+
+
 def _settings(tmp_path):
     return Settings(
         data_dir=tmp_path,
@@ -69,6 +79,7 @@ def test_v2_service_trusts_calibrated_retrieval_support(tmp_path):
         knowledge_base=knowledge_base,
         router=FakeRouter(),
         answerer=answerer,
+        verifier=FakeVerifier(True),
     )
 
     response = service.chat("Attendance nawa nake bukata?")
@@ -89,6 +100,7 @@ def test_v2_service_abstains_when_reranker_support_is_below_threshold(tmp_path):
         knowledge_base=FakeKnowledgeBase(supported=False),
         router=FakeRouter(),
         answerer=answerer,
+        verifier=FakeVerifier(False),
     )
 
     response = service.chat("Nawa ake biyan allowance?")
