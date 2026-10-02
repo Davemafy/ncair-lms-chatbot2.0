@@ -56,13 +56,16 @@ Routing rules:
 EVIDENCE_SYSTEM_PROMPT = """Decide whether one official NCAIR passage directly answers the
 retrieval question. Return exactly one JSON object and no prose:
 
-{"supported":true|false}
+{"supported":true|false,"quote":"<exact excerpt from the passage or empty string>"}
 
 Rules:
 - Use only the supplied passage. Do not use outside knowledge.
-- Return true when the passage explicitly states the requested fact or directly corrects the
-  claim in the question.
-- Different wording is fine; the requested fact itself must be present.
+- Return true only when the passage explicitly states the requested fact or directly corrects
+  the claim in the question.
+- When supported is true, quote must copy an exact excerpt from the supplied passage that
+  contains the supporting fact. Do not paraphrase the quote.
+- When supported is false, quote must be an empty string.
+- Different wording in the question is fine; the requested fact itself must be present.
 - Return false for mere topical similarity, missing facts, or ambiguous evidence.
 """
 
@@ -73,11 +76,29 @@ satisfies the user's requested outcome. Return exactly one JSON object and no pr
 
 Rules:
 - The candidate tool has already been selected by the semantic router.
-- Return true only when executing that exact portal destination or numbered onboarding step
-  would directly satisfy what the user asked for.
-- Return false when the user is actually asking for information, a policy, requirement,
-  explanation, troubleshooting, or claim verification, even if the topic has a related page.
+- Return true when the user asked for that destination/page or explicitly asked about that
+  numbered onboarding step.
+- Return false only when executing the candidate would fail to provide the information the
+  user actually requested, such as a policy, requirement, explanation, troubleshooting fact,
+  or claim verification.
+- Judge the requested outcome, not merely the topic words.
 - Do not choose another tool and do not answer the request.
+"""
+
+KNOWLEDGE_CHALLENGE_SYSTEM_PROMPT = """Act as a conservative escalation guard for the NCAIR
+LMS assistant. A direct router selected a portal or numbered-step tool and a first verifier
+said that tool may be insufficient. Decide whether a knowledge-base answer is actually
+required. Return exactly one JSON object and no prose:
+
+{"knowledge_required":true|false}
+
+Rules:
+- Return false when the user is asking for a page, URL, destination, or the selected numbered
+  onboarding step itself.
+- Return true when the user needs a factual answer, policy, requirement, explanation,
+  troubleshooting fact, or claim verification rather than merely the destination/step.
+- If the request can be satisfied by executing the candidate tool as stated, return false.
+- Do not answer the request and do not choose a different portal action or step.
 """
 
 KNOWLEDGE_QUERY_SYSTEM_PROMPT = """Convert the user's information need into one concise
@@ -87,8 +108,10 @@ and no prose:
 {"query":"<concise English retrieval query>"}
 
 Rules:
-- Preserve the user's actual information need.
+- Preserve the user's actual information need, including numbers, constraints, actor type,
+  requested attribute, and named NCAIR/LMS entities.
 - Translate the information need into concise English when necessary.
+- Prefer a short factual search phrase over a conversational sentence.
 - Do not answer the question.
 - Do not return a portal action or onboarding step.
 """
@@ -246,6 +269,28 @@ def _json_object(raw: str) -> dict:
     return value
 
 
+
+
+
+_ORTHOGRAPHIC_LANGUAGE_MARKERS = {
+    Language.HAUSA: frozenset({"ƙ", "ɗ", "ɓ", "ƴ", "ƙ".upper(), "ɗ".upper(), "ɓ".upper()}),
+    Language.YORUBA: frozenset({"ṣ", "Ṣ", "ẹ", "Ẹ"}),
+    Language.IGBO: frozenset({"ị", "Ị", "ụ", "Ụ"}),
+}
+
+
+def _orthographic_language_hint(question: str) -> Language | None:
+    """Return a language only when orthography gives one unambiguous supported-language hint."""
+    matches = {
+        language
+        for language, markers in _ORTHOGRAPHIC_LANGUAGE_MARKERS.items()
+        if any(marker in question for marker in markers)
+    }
+    if len(matches) == 1:
+        return next(iter(matches))
+    return None
+
+
 class NatlasLanguageDetector:
     def __init__(self, client: NatlasTextClient):
         self._client = client
@@ -258,6 +303,18 @@ class NatlasLanguageDetector:
         except (KeyError, TypeError, ValueError) as exc:
             raise InvalidModelOutputError("N-ATLaS returned an invalid language label.") from exc
 
+    @staticmethod
+    def _reconcile(question: str, detected: Language) -> Language:
+        hint = _orthographic_language_hint(question)
+        if hint is not None and hint is not detected:
+            LOGGER.info(
+                "natlas_language_orthography_override detected=%s override=%s",
+                detected.value,
+                hint.value,
+            )
+            return hint
+        return detected
+
     def detect(self, question: str) -> Language:
         messages = [
             {"role": "system", "content": LANGUAGE_SYSTEM_PROMPT},
@@ -266,7 +323,7 @@ class NatlasLanguageDetector:
         raw = self._client.generate(messages, max_new_tokens=40)
 
         try:
-            return self._parse(raw)
+            return self._reconcile(question, self._parse(raw))
         except InvalidModelOutputError as first_error:
             LOGGER.warning("natlas_invalid_language_output raw=%r", raw[:1000])
             retry = self._client.generate(
@@ -284,7 +341,7 @@ class NatlasLanguageDetector:
                 max_new_tokens=40,
             )
             try:
-                return self._parse(retry)
+                return self._reconcile(question, self._parse(retry))
             except InvalidModelOutputError as retry_error:
                 LOGGER.warning("natlas_invalid_language_retry raw=%r", retry[:1000])
                 raise retry_error from first_error
