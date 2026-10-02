@@ -102,10 +102,21 @@ _PORTAL_TERMS = {
     ),
 }
 
-_NAVIGATION_CUES = (
-    "open", "show me", "take me", "go to", "visit", "page", "website", "link", "url", "portal",
-    "bude", "buɗe", "shafi", "shafin", "kai ni", "nuna min", "ṣí", "si", "ojú ìwé", "oju iwe",
-    "mú mi lọ", "mu mi lo", "meghee", "peeji",
+_NAVIGATION_ACTION_CUES = (
+    "open",
+    "show me",
+    "take me",
+    "go to",
+    "visit",
+    "bude",
+    "buɗe",
+    "kai ni",
+    "nuna min",
+    "ṣí",
+    "si oju iwe",
+    "mú mi lọ",
+    "mu mi lo",
+    "meghee",
 )
 
 _LOGIN_NAVIGATION_PATTERNS = (
@@ -325,9 +336,21 @@ def _explicit_step(question: str) -> int | None:
     return None
 
 
+def _contains_phrase(text: str, phrase: str) -> bool:
+    normalized = re.escape(_fold(phrase)).replace(r"\ ", r"\s+")
+    return re.search(rf"(?:^|\s){normalized}(?:\s|$)", text) is not None
+
+
 def _has_navigation_intent(question: str) -> bool:
     folded = _fold(question)
-    if any(_fold(cue) in folded for cue in _NAVIGATION_CUES):
+    if any(_contains_phrase(folded, cue) for cue in _NAVIGATION_ACTION_CUES):
+        return True
+    if re.search(r"\b(?:need|want)\b.*\b(?:page|link|url|website|portal)\b", folded):
+        return True
+    if re.search(
+        r"\bina\s+son\b.*\b(?:shafi|website|gidan\s+yanar\s+gizon?)\b",
+        folded,
+    ):
         return True
     return any(re.search(pattern, folded) for pattern in _LOGIN_NAVIGATION_PATTERNS)
 
