@@ -12,6 +12,8 @@ from .config import Settings
 from .errors import InvalidModelOutputError, ModelUnavailableError
 from .models import Language, PortalAction, RoutingDecision, RoutingStatus, ToolName
 
+# fmt: off
+
 LOGGER = logging.getLogger(__name__)
 
 LANGUAGE_SYSTEM_PROMPT = """Identify the language carrying the grammar of the user request.
@@ -802,3 +804,5 @@ class NatlasGroundedAnswerer:
         if not answer:
             raise InvalidModelOutputError("N-ATLaS returned an empty answer.")
         return answer
+
+# fmt: on
