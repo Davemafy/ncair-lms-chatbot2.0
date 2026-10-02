@@ -44,6 +44,28 @@ the user wants information rather than navigation. If the user asks how/where to
 interface itself, choose get_portal_link.
 """
 
+ROUTE_SYSTEM_PROMPT = """Route the user's request to exactly one NCAIR LMS capability and include
+the required argument in the same JSON object. Return JSON only.
+
+Valid shapes:
+{"tool":"get_portal_link","action":"main|login|ncair_home|register|profile|courses|track_selection|support"}
+{"tool":"get_step_guidance","step":1|2|3|4}
+{"tool":"search_ncair_knowledge_base"}
+
+Decision rules:
+- get_portal_link: the user's requested outcome is to reach, open, access, or use a particular
+  LMS/NCAIR destination or interface. Navigation can be indirect; the user does not need to say
+  "page", "link", "URL", or "portal".
+- get_step_guidance: the user asks what to do at one particular onboarding stage among 1-4.
+  The stage may be written as a digit, ordinal wording, or its equivalent in the user's language.
+- search_ncair_knowledge_base: the user wants facts, rules, requirements, schedules,
+  explanations, troubleshooting, verification, or information that may be undocumented.
+
+Distinguish destination-seeking from information-seeking. A topic such as login, registration,
+profile, courses, track selection, or support is knowledge search when the user asks about it,
+and portal navigation when the user asks to reach or use that interface.
+"""
+
 PORTAL_SYSTEM_PROMPT = """The user explicitly wants an NCAIR/LMS destination. Return exactly one
 JSON object and no prose:
 {"action":"main|login|ncair_home|register|profile|courses|track_selection|support"}
@@ -607,6 +629,29 @@ def _parse_step(raw: str) -> int:
         raise InvalidModelOutputError("N-ATLaS returned an invalid onboarding step.")
     return int(value)
 
+def _parse_route(raw: str, *, language: Language, question: str) -> RoutingDecision:
+    tool = _parse_tool(raw)
+    if tool is ToolName.PORTAL_LINK:
+        return RoutingDecision(
+            language=language,
+            tool=tool,
+            action=_parse_portal_action(raw),
+            status=RoutingStatus.MODEL,
+        ).validate()
+    if tool is ToolName.STEP_GUIDANCE:
+        return RoutingDecision(
+            language=language,
+            tool=tool,
+            step=_parse_step(raw),
+            status=RoutingStatus.MODEL,
+        ).validate()
+    return RoutingDecision(
+        language=language,
+        tool=ToolName.KNOWLEDGE,
+        retrieval_query=question.strip(),
+        status=RoutingStatus.MODEL,
+    ).validate()
+
 
 def _normalized_evidence_text(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
@@ -688,6 +733,38 @@ class NatlasRouter:
     ):
         self._client = client
         self._language_detector = language_detector or NatlasLanguageDetector(client)
+
+    def _model_route(self, question: str, *, language: Language) -> RoutingDecision:
+        messages = [
+            {"role": "system", "content": ROUTE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Input language: {language.value}\nUser request:\n{question}",
+            },
+        ]
+        raw = self._client.generate(messages, max_new_tokens=90)
+        try:
+            return _parse_route(raw, language=language, question=question)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Return only one valid route JSON matching exactly one of the "
+                            "documented shapes, with the required action or step when applicable."
+                        ),
+                    },
+                ],
+                max_new_tokens=90,
+            )
+            try:
+                return _parse_route(retry, language=language, question=question)
+            except InvalidModelOutputError as retry_error:
+                raise retry_error from first_error
 
     def _model_tool(self, question: str, *, language: Language) -> ToolName:
         messages = [
@@ -812,42 +889,14 @@ class NatlasRouter:
                 status=RoutingStatus.MODEL,
             ).validate()
 
-        # For ambiguous requests, N-ATLaS remains the semantic router. The deterministic contract
-        # validator may only make a specialized decision stricter, never invent one.
+        # Ambiguous requests use one structured N-ATLaS decision so tool selection and the
+        # corresponding argument are resolved together. Deterministic contracts above remain
+        # fast paths for requests that are already explicit.
         try:
-            model_tool = self._model_tool(question, language=language)
+            return self._model_route(question, language=language)
         except InvalidModelOutputError:
-            LOGGER.warning("natlas_tool_fallback_to_knowledge")
+            LOGGER.warning("natlas_route_fallback_to_knowledge")
             return self._knowledge(language, question)
-
-        if model_tool is ToolName.KNOWLEDGE:
-            return self._knowledge(language, question)
-
-        if model_tool is ToolName.STEP_GUIDANCE:
-            try:
-                model_step = self._model_step(question)
-            except InvalidModelOutputError:
-                LOGGER.warning("natlas_step_fallback_to_knowledge")
-                return self._knowledge(language, question)
-            return RoutingDecision(
-                language=language,
-                tool=ToolName.STEP_GUIDANCE,
-                step=model_step,
-                status=RoutingStatus.MODEL,
-            ).validate()
-
-        try:
-            action = self._model_portal_action(question)
-        except InvalidModelOutputError:
-            LOGGER.warning("natlas_portal_fallback_to_knowledge")
-            return self._knowledge(language, question)
-
-        return RoutingDecision(
-            language=language,
-            tool=ToolName.PORTAL_LINK,
-            action=action,
-            status=RoutingStatus.MODEL,
-        ).validate()
 
 
 class NatlasEvidenceVerifier:
