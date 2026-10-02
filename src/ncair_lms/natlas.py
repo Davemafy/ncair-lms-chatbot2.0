@@ -45,6 +45,14 @@ JSON object and no prose:
 Choose the destination that best matches the request. Do not answer the request.
 """
 
+STEP_SYSTEM_PROMPT = """The user wants guidance for one numbered NCAIR onboarding stage or step.
+Return exactly one JSON object and no prose:
+{"step":1|2|3|4}
+
+Infer the intended step from the user's wording, including ordinal or translated equivalents.
+If no onboarding step 1-4 is identifiable, return {"step":null}.
+"""
+
 EVIDENCE_SYSTEM_PROMPT = """Determine the relation between the user's information need and the
 supplied official NCAIR evidence. Return exactly one JSON object and no prose:
 {"verdict":"supported|contradicted|not_found","evidence_quote":"<exact quote or empty>"}
@@ -585,6 +593,15 @@ def _parse_portal_action(raw: str) -> PortalAction:
         raise InvalidModelOutputError("N-ATLaS returned an invalid portal action.") from exc
     return PortalAction.LOGIN if action is PortalAction.SIGNIN else action
 
+def _parse_step(raw: str) -> int:
+    payload = _json_object(raw)
+    value = payload.get("step")
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if value not in {1, 2, 3, 4}:
+        raise InvalidModelOutputError("N-ATLaS returned an invalid onboarding step.")
+    return int(value)
+
 
 def _normalized_evidence_text(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
@@ -699,6 +716,35 @@ class NatlasRouter:
             except InvalidModelOutputError as retry_error:
                 raise retry_error from first_error
 
+    def _model_step(self, question: str) -> int:
+        messages = [
+            {"role": "system", "content": STEP_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
+        raw = self._client.generate(messages, max_new_tokens=40)
+        try:
+            return _parse_step(raw)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_step_output raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Return only one valid JSON step using exactly one of "
+                            "1, 2, 3, or 4."
+                        ),
+                    },
+                ],
+                max_new_tokens=40,
+            )
+            try:
+                return _parse_step(retry)
+            except InvalidModelOutputError as retry_error:
+                raise retry_error from first_error
+
     def _model_portal_action(self, question: str) -> PortalAction:
         messages = [
             {"role": "system", "content": PORTAL_SYSTEM_PROMPT},
@@ -771,14 +817,24 @@ class NatlasRouter:
 
         if model_tool is ToolName.KNOWLEDGE:
             return self._knowledge(language, question)
+
         if model_tool is ToolName.STEP_GUIDANCE:
-            return self._knowledge(language, question)
-        if not navigation_intent:
-            return self._knowledge(language, question)
+            try:
+                model_step = self._model_step(question)
+            except InvalidModelOutputError:
+                LOGGER.warning("natlas_step_fallback_to_knowledge")
+                return self._knowledge(language, question)
+            return RoutingDecision(
+                language=language,
+                tool=ToolName.STEP_GUIDANCE,
+                step=model_step,
+                status=RoutingStatus.MODEL,
+            ).validate()
 
         try:
             action = self._model_portal_action(question)
         except InvalidModelOutputError:
+            LOGGER.warning("natlas_portal_fallback_to_knowledge")
             return self._knowledge(language, question)
 
         return RoutingDecision(
