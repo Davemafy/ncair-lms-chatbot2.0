@@ -74,6 +74,7 @@ class EvidencePassage:
     source: str
     text: str
     page: int | None = None
+    score: float | None = None
 
     @property
     def citation(self) -> str:
@@ -84,6 +85,8 @@ class EvidencePassage:
 class RetrievedEvidence:
     passages: tuple[EvidencePassage, ...] = ()
     support_verified: bool | None = None
+    support_score: float | None = None
+    support_margin: float | None = None
 
     @property
     def supported(self) -> bool:
