@@ -180,8 +180,6 @@ class AssistantService:
                 len(result.evidence.passages),
                 verifier_question,
             )
-            from dataclasses import replace
-
             result = ToolResult(
                 answer=result.answer,
                 evidence=replace(result.evidence, support_verified=supported),
