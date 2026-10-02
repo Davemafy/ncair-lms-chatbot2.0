@@ -132,10 +132,7 @@ def test_router_canonicalizes_explicit_navigation_even_if_model_misroutes():
 
 
 def test_router_uses_model_step_when_fast_path_does_not_match():
-    client = FakeClient(
-        '{"tool":"get_step_guidance"}',
-        '{"step":2}',
-    )
+    client = FakeClient('{"tool":"get_step_guidance","step":2}')
     router = NatlasRouter(client)
 
     decision = router.route("What happens at the second onboarding stage?")
@@ -145,10 +142,7 @@ def test_router_uses_model_step_when_fast_path_does_not_match():
 
 
 def test_router_uses_model_portal_when_fast_path_does_not_match():
-    client = FakeClient(
-        '{"tool":"get_portal_link"}',
-        '{"action":"login"}',
-    )
+    client = FakeClient('{"tool":"get_portal_link","action":"login"}')
     router = NatlasRouter(client)
 
     decision = router.route("I need somewhere to enter my credentials.")
