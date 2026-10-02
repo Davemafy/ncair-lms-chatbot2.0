@@ -44,28 +44,6 @@ the user wants information rather than navigation. If the user asks how/where to
 interface itself, choose get_portal_link.
 """
 
-ROUTE_SYSTEM_PROMPT = """Route the user's request to exactly one NCAIR LMS capability and include
-the required argument in the same JSON object. Return JSON only.
-
-Valid shapes:
-{"tool":"get_portal_link","action":"main|login|ncair_home|register|profile|courses|track_selection|support"}
-{"tool":"get_step_guidance","step":1|2|3|4}
-{"tool":"search_ncair_knowledge_base"}
-
-Decision rules:
-- get_portal_link: the user's requested outcome is to reach, open, access, or use a particular
-  LMS/NCAIR destination or interface. Navigation can be indirect; the user does not need to say
-  "page", "link", "URL", or "portal".
-- get_step_guidance: the user asks what to do at one particular onboarding stage among 1-4.
-  The stage may be written as a digit, ordinal wording, or its equivalent in the user's language.
-- search_ncair_knowledge_base: the user wants facts, rules, requirements, schedules,
-  explanations, troubleshooting, verification, or information that may be undocumented.
-
-Distinguish destination-seeking from information-seeking. A topic such as login, registration,
-profile, courses, track selection, or support is knowledge search when the user asks about it,
-and portal navigation when the user asks to reach or use that interface.
-"""
-
 PORTAL_SYSTEM_PROMPT = """The user explicitly wants an NCAIR/LMS destination. Return exactly one
 JSON object and no prose:
 {"action":"main|login|ncair_home|register|profile|courses|track_selection|support"}
@@ -284,15 +262,21 @@ _LANGUAGE_LEXICON = {
 
 _PORTAL_TERMS = {
     PortalAction.LOGIN: (
-        "sign in", "signin", "login", "log in", "wọlé", "wole", "shiga", "abanye", "banye",
+        "sign in", "signin", "login", "log in", "credentials", "login details",
+        "bayanan shiga", "wọlé", "wole", "shiga", "shigar", "abanye", "banye",
     ),
     PortalAction.TRACK_SELECTION: (
-        "track selection", "select track", "track page", "zaben track", "zaɓen track",
+        "track selection", "select track", "choose track", "choose my track", "learning track",
+        "track page", "zaben track", "zaɓen track",
     ),
-    PortalAction.PROFILE: ("profile", "profaịlụ"),
-    PortalAction.SUPPORT: ("support", "contact"),
+    PortalAction.PROFILE: (
+        "profile", "profaịlụ", "profailu", "intern details", "profile details",
+    ),
+    PortalAction.SUPPORT: (
+        "support", "contact", "help", "taimako", "enyemaka", "ìrànlọ́wọ́", "iranlowo",
+    ),
     PortalAction.COURSES: (
-        "courses", "course page", "my courses", "see my courses", "hụ courses",
+        "course", "courses", "course page", "my courses", "see my courses", "hụ courses",
     ),
     PortalAction.REGISTER: (
         "registration page", "register page", "registration", "register", "rajistar",
@@ -332,7 +316,33 @@ _LOGIN_NAVIGATION_PATTERNS = (
     r"\bebee\s+ka\s+m\s+ga[-\s]?abanye\b",
 )
 
-_STEP_CUES = ("step", "mataki", "ìgbésẹ̀", "igbese")
+_NAVIGATION_SURFACE_CUES = (
+    "page", "screen", "interface", "portal", "website",
+    "shafi", "shafin",
+    "ojú ìwé", "oju iwe", "ojú-ewe", "oju ewe",
+    "ibe", "peeji",
+)
+
+_LOCATION_NAVIGATION_PATTERNS = (
+    r"\bwhere\b.*\b(?:enter|type|put|use)\b.*\b(?:credential|credentials|login|password)\b",
+    r"\bina\s+zan\b.*\b(?:shiga|shigar|samu|je)\b",
+    r"\b(?:nibo|ibo)\b.*\b(?:wole|lo|ri)\b",
+    r"\bebee\b.*\b(?:banye|abanye|ahu|ga)\b",
+)
+
+_STEP_CUES = (
+    "step", "stage",
+    "mataki",
+    "ìgbésẹ̀", "igbese",
+    "nzọụkwụ", "nzoukwu",
+)
+
+_STEP_NUMBER_TERMS = {
+    1: ("1", "one", "first", "farko", "daya", "àkọ́kọ́", "akoko", "mbụ", "mbu"),
+    2: ("2", "two", "second", "biyu", "kejì", "keji", "abụọ", "abuo"),
+    3: ("3", "three", "third", "uku", "kẹta", "keta", "atọ", "ato"),
+    4: ("4", "four", "fourth", "hudu", "kẹrin", "kerin", "anọ", "ano"),
+}
 
 
 class NatlasTextClient(Protocol):
@@ -529,16 +539,12 @@ def _explicit_step(question: str) -> int | None:
     folded = _fold(question)
     if not any(re.search(rf"\b{re.escape(_fold(cue))}\b", folded) for cue in _STEP_CUES):
         return None
-    match = re.search(r"\b([1-4])\b", folded)
-    if match:
-        return int(match.group(1))
-    number_words = {
-        "one": 1, "first": 1, "two": 2, "second": 2,
-        "three": 3, "third": 3, "four": 4, "fourth": 4,
-    }
-    for word, number in number_words.items():
-        if re.search(rf"\b{word}\b", folded):
-            return number
+
+    for number, terms in _STEP_NUMBER_TERMS.items():
+        for term in terms:
+            normalized = _fold(term)
+            if re.search(rf"\b{re.escape(normalized)}\b", folded):
+                return number
     return None
 
 
@@ -549,16 +555,33 @@ def _contains_phrase(text: str, phrase: str) -> bool:
 
 def _has_navigation_intent(question: str) -> bool:
     folded = _fold(question)
+
     if any(_contains_phrase(folded, cue) for cue in _NAVIGATION_ACTION_CUES):
         return True
-    if re.search(r"\b(?:need|want)\b.*\b(?:page|link|url|website|portal)\b", folded):
-        return True
-    if re.search(
-        r"\bina\s+son\b.*\b(?:shafi|website|gidan\s+yanar\s+gizon?)\b",
+
+    has_surface = any(_contains_phrase(folded, cue) for cue in _NAVIGATION_SURFACE_CUES)
+    if has_surface and re.search(
+        r"\b(?:need|want|find|edit|choose|select|view|see|reach|access|straight|where)\b",
         folded,
     ):
         return True
-    return any(re.search(pattern, folded) for pattern in _LOGIN_NAVIGATION_PATTERNS)
+
+    if re.search(
+        r"\bina\s+(?:son|zan)\b.*\b(?:shafi|shafin|website|gidan\s+yanar\s+gizon?)\b",
+        folded,
+    ):
+        return True
+
+    if has_surface and re.search(
+        r"\b(?:samu|taimako|kpoga|edezi|ahu|ri|course|courses|profile|profailu)\b",
+        folded,
+    ):
+        return True
+
+    return any(
+        re.search(pattern, folded)
+        for pattern in (*_LOGIN_NAVIGATION_PATTERNS, *_LOCATION_NAVIGATION_PATTERNS)
+    )
 
 
 def _explicit_portal_action(question: str) -> PortalAction | None:
@@ -628,29 +651,6 @@ def _parse_step(raw: str) -> int:
     if value not in {1, 2, 3, 4}:
         raise InvalidModelOutputError("N-ATLaS returned an invalid onboarding step.")
     return int(value)
-
-def _parse_route(raw: str, *, language: Language, question: str) -> RoutingDecision:
-    tool = _parse_tool(raw)
-    if tool is ToolName.PORTAL_LINK:
-        return RoutingDecision(
-            language=language,
-            tool=tool,
-            action=_parse_portal_action(raw),
-            status=RoutingStatus.MODEL,
-        ).validate()
-    if tool is ToolName.STEP_GUIDANCE:
-        return RoutingDecision(
-            language=language,
-            tool=tool,
-            step=_parse_step(raw),
-            status=RoutingStatus.MODEL,
-        ).validate()
-    return RoutingDecision(
-        language=language,
-        tool=ToolName.KNOWLEDGE,
-        retrieval_query=question.strip(),
-        status=RoutingStatus.MODEL,
-    ).validate()
 
 
 def _normalized_evidence_text(text: str) -> str:
@@ -733,38 +733,6 @@ class NatlasRouter:
     ):
         self._client = client
         self._language_detector = language_detector or NatlasLanguageDetector(client)
-
-    def _model_route(self, question: str, *, language: Language) -> RoutingDecision:
-        messages = [
-            {"role": "system", "content": ROUTE_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Input language: {language.value}\nUser request:\n{question}",
-            },
-        ]
-        raw = self._client.generate(messages, max_new_tokens=90)
-        try:
-            return _parse_route(raw, language=language, question=question)
-        except InvalidModelOutputError as first_error:
-            LOGGER.warning("natlas_invalid_route_output raw=%r", raw[:1000])
-            retry = self._client.generate(
-                [
-                    *messages,
-                    {"role": "assistant", "content": raw},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Return only one valid route JSON matching exactly one of the "
-                            "documented shapes, with the required action or step when applicable."
-                        ),
-                    },
-                ],
-                max_new_tokens=90,
-            )
-            try:
-                return _parse_route(retry, language=language, question=question)
-            except InvalidModelOutputError as retry_error:
-                raise retry_error from first_error
 
     def _model_tool(self, question: str, *, language: Language) -> ToolName:
         messages = [
@@ -889,14 +857,42 @@ class NatlasRouter:
                 status=RoutingStatus.MODEL,
             ).validate()
 
-        # Ambiguous requests use one structured N-ATLaS decision so tool selection and the
-        # corresponding argument are resolved together. Deterministic contracts above remain
-        # fast paths for requests that are already explicit.
+        # For ambiguous requests, N-ATLaS remains the semantic router. The deterministic contract
+        # validator may only make a specialized decision stricter, never invent one.
         try:
-            return self._model_route(question, language=language)
+            model_tool = self._model_tool(question, language=language)
         except InvalidModelOutputError:
-            LOGGER.warning("natlas_route_fallback_to_knowledge")
+            LOGGER.warning("natlas_tool_fallback_to_knowledge")
             return self._knowledge(language, question)
+
+        if model_tool is ToolName.KNOWLEDGE:
+            return self._knowledge(language, question)
+
+        if model_tool is ToolName.STEP_GUIDANCE:
+            try:
+                model_step = self._model_step(question)
+            except InvalidModelOutputError:
+                LOGGER.warning("natlas_step_fallback_to_knowledge")
+                return self._knowledge(language, question)
+            return RoutingDecision(
+                language=language,
+                tool=ToolName.STEP_GUIDANCE,
+                step=model_step,
+                status=RoutingStatus.MODEL,
+            ).validate()
+
+        try:
+            action = self._model_portal_action(question)
+        except InvalidModelOutputError:
+            LOGGER.warning("natlas_portal_fallback_to_knowledge")
+            return self._knowledge(language, question)
+
+        return RoutingDecision(
+            language=language,
+            tool=ToolName.PORTAL_LINK,
+            action=action,
+            status=RoutingStatus.MODEL,
+        ).validate()
 
 
 class NatlasEvidenceVerifier:
