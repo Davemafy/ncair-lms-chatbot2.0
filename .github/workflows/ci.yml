@@ -20,6 +20,7 @@ jobs:
       - run: ruff format --check .
       - run: bash -n deploy/*.sh
       - run: python -m eval.validate_benchmark
+      - run: python -m eval.validate_holdout
       - run: python -m pytest tests/unit
 
   worker:
