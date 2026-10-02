@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import unicodedata
 from collections.abc import Sequence
 from datetime import datetime
 from enum import StrEnum
@@ -13,72 +14,99 @@ from .models import Language, PortalAction, RoutingDecision, RoutingStatus, Tool
 LOGGER = logging.getLogger(__name__)
 
 
-LANGUAGE_SYSTEM_PROMPT = """Classify the language carrying the grammar of the user request.
-Choose exactly one semantic label from this set:
+LANGUAGE_SYSTEM_PROMPT = """Identify the language carrying the grammar of the user request.
+Return exactly one label: English, Hausa, Yoruba, or Igbo.
 
-english = English
-hausa = Hausa
-yoruba = Yoruba
-igbo = Igbo
-
-Ignore names, URLs, acronyms, course names, and borrowed English technical words when the
-surrounding sentence grammar belongs to another language. For code-switched text, classify
-the language carrying most of the sentence structure.
+Ignore names, URLs, acronyms, course names, and borrowed English technical words. For
+code-switched text, choose the language carrying most of the sentence structure. Do not
+translate the request and do not explain your choice.
 """
 
 
-ROUTE_SYSTEM_PROMPT = """Classify the requested outcome for the NCAIR LMS assistant.
-Choose exactly one semantic label from this set:
+OUTCOME_SYSTEM_PROMPT = """Classify what outcome the user wants from the NCAIR LMS assistant.
+Return exactly one label: navigation, step guidance, or knowledge answer.
 
-home = LMS main/home page
-login = LMS sign-in/login page
-website = official NCAIR website home page
-register = LMS registration page
-profile = intern profile page
-courses = courses page
-track = track-selection page
-support = NCAIR support/contact page
-first = onboarding step 1
-second = onboarding step 2
-third = onboarding step 3
-fourth = onboarding step 4
-knowledge = knowledge question
+navigation = the user wants a page, link, URL, or destination opened or shown.
+step guidance = the user explicitly wants one numbered onboarding step.
+knowledge answer = the user wants information: a fact, policy, requirement, rule, limit,
+schedule, explanation, troubleshooting answer, or verification of a claim.
 
-Use home, login, website, register, profile, courses, track, or support only when the user
-wants that page, link, URL, or destination itself.
-Use first, second, third, or fourth only when the user explicitly asks about that numbered
-onboarding step.
-Use knowledge when the user wants information: a fact, policy, requirement, rule, limit,
-schedule, explanation, troubleshooting answer, verification of a claim, or information that
-may not be documented. A request remains knowledge when it mentions a portal topic but asks
-for information about that topic instead of asking to open the page.
+Classify the requested outcome, not topic words. A factual question about login, registration,
+courses, profile, support, or any other portal topic is still knowledge answer when the user
+wants information rather than the page itself.
 """
 
 
-class RouteLabel(StrEnum):
-    LMS_HOME = "home"
-    SIGN_IN = "login"
-    NCAIR_HOME = "website"
-    REGISTER = "register"
-    PROFILE = "profile"
+PAGE_SYSTEM_PROMPT = """The user wants navigation. Identify the requested destination.
+Return exactly one label from this set:
+
+LMS home
+LMS sign-in
+NCAIR website
+LMS registration
+intern profile
+courses
+track selection
+NCAIR support
+
+Choose the destination itself. Do not explain your choice.
+"""
+
+
+STEP_SYSTEM_PROMPT = """The user wants numbered onboarding guidance.
+Return exactly one label: step 1, step 2, step 3, or step 4.
+Do not explain your choice.
+"""
+
+
+class OutcomeKind(StrEnum):
+    NAVIGATION = "navigation"
+    STEP_GUIDANCE = "step guidance"
+    KNOWLEDGE = "knowledge answer"
+
+
+class PageLabel(StrEnum):
+    LMS_HOME = "LMS home"
+    SIGN_IN = "LMS sign-in"
+    NCAIR_HOME = "NCAIR website"
+    REGISTER = "LMS registration"
+    PROFILE = "intern profile"
     COURSES = "courses"
-    TRACK_SELECTION = "track"
-    SUPPORT = "support"
-    STEP_1 = "first"
-    STEP_2 = "second"
-    STEP_3 = "third"
-    STEP_4 = "fourth"
-    KNOWLEDGE = "knowledge"
+    TRACK_SELECTION = "track selection"
+    SUPPORT = "NCAIR support"
+
+
+class StepLabel(StrEnum):
+    STEP_1 = "step 1"
+    STEP_2 = "step 2"
+    STEP_3 = "step 3"
+    STEP_4 = "step 4"
 
 
 _LANGUAGE_BY_CHOICE = {
-    "english": Language.ENGLISH,
-    "hausa": Language.HAUSA,
-    "yoruba": Language.YORUBA,
-    "igbo": Language.IGBO,
+    "English": Language.ENGLISH,
+    "Hausa": Language.HAUSA,
+    "Yoruba": Language.YORUBA,
+    "Igbo": Language.IGBO,
 }
 
-_ROUTE_CHOICES = tuple(label.value for label in RouteLabel)
+_PAGE_ACTIONS = {
+    PageLabel.LMS_HOME: PortalAction.MAIN,
+    PageLabel.SIGN_IN: PortalAction.LOGIN,
+    PageLabel.NCAIR_HOME: PortalAction.NCAIR_HOME,
+    PageLabel.REGISTER: PortalAction.REGISTER,
+    PageLabel.PROFILE: PortalAction.PROFILE,
+    PageLabel.COURSES: PortalAction.COURSES,
+    PageLabel.TRACK_SELECTION: PortalAction.TRACK_SELECTION,
+    PageLabel.SUPPORT: PortalAction.SUPPORT,
+}
+
+_STEP_NUMBERS = {
+    StepLabel.STEP_1: 1,
+    StepLabel.STEP_2: 2,
+    StepLabel.STEP_3: 3,
+    StepLabel.STEP_4: 4,
+}
 
 
 class NatlasClient(Protocol):
@@ -90,9 +118,9 @@ class NatlasClient(Protocol):
 class LocalNatlasClient:
     """Lazy local adapter for NCAIR1/N-ATLaS.
 
-    Generation is used only for the final grounded answer. Language and routing are closed-set
-    classifications computed from candidate-token likelihoods, so invalid JSON/tool outputs are
-    impossible.
+    Final answers use ordinary deterministic generation. Classification uses constrained
+    decoding over meaningful labels, so the model cannot emit invalid language, intent, page,
+    or step values and does not have to compare opaque token codes.
     """
 
     def __init__(self, settings: Settings):
@@ -113,7 +141,11 @@ class LocalNatlasClient:
                 "Install the runtime dependencies first."
             ) from exc
 
-        kwargs = {"device_map": self._settings.natlas_device, "torch_dtype": "auto"}
+        kwargs = {
+            "device_map": self._settings.natlas_device,
+            "torch_dtype": "auto",
+            "low_cpu_mem_usage": True,
+        }
         if self._settings.natlas_quantization == "4bit":
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -182,135 +214,116 @@ class LocalNatlasClient:
             raise ModelUnavailableError("N-ATLaS inference failed.") from exc
 
     def choose(self, messages: Sequence[dict[str, str]], choices: Sequence[str]) -> str:
-        """Return the highest-likelihood allowed semantic continuation.
-
-        Classification choices are never generated freely. Common single-token labels take one
-        model forward pass. Multi-token labels use a batched likelihood fallback while retaining
-        only the logits needed to score the candidate continuation when the model supports it.
-        """
+        """Generate exactly one allowed semantic label using a token-prefix trie."""
         self._ensure_loaded()
         assert self._tokenizer is not None
         assert self._model is not None
 
-        if not choices:
-            raise ValueError("choices must not be empty")
-
         normalized_choices = tuple(choice.strip() for choice in choices)
-        if any(not choice for choice in normalized_choices):
-            raise ValueError("classification choices must not be empty")
+        if not normalized_choices or any(not choice for choice in normalized_choices):
+            raise ValueError("classification choices must be non-empty")
         if len(set(normalized_choices)) != len(normalized_choices):
             raise ValueError("classification choices must be unique")
 
         try:
-            import torch
-
             prompt = self._chat_prompt(messages)
-            prompt_inputs = self._tokenizer(
+            inputs = self._tokenizer(
                 prompt,
-                add_special_tokens=False,
                 return_tensors="pt",
+                add_special_tokens=False,
             )
-            prompt_ids = prompt_inputs["input_ids"][0].tolist()
-            if not prompt_ids:
-                raise InvalidModelOutputError("N-ATLaS classification prompt tokenized to empty.")
+            prompt_length = inputs["input_ids"].shape[-1]
+            model_device = next(self._model.parameters()).device
+            inputs = {name: value.to(model_device) for name, value in inputs.items()}
 
-            # A leading space makes each label an explicit natural-language continuation instead
-            # of an opaque token code. It also avoids relying on tokenizer boundary merging.
-            choice_ids = [
+            # Labels are explicit natural-language continuations. Prefixing one space makes
+            # continuation tokenization stable across the allowed set.
+            candidate_ids = [
                 self._tokenizer(f" {choice}", add_special_tokens=False)["input_ids"]
                 for choice in normalized_choices
             ]
-            if any(not token_ids for token_ids in choice_ids):
+            if any(not token_ids for token_ids in candidate_ids):
                 raise InvalidModelOutputError("A classification choice tokenized to empty.")
 
-            model_device = next(self._model.parameters()).device
+            stop_ids = {self._tokenizer.eos_token_id}
+            eot_id = self._tokenizer.convert_tokens_to_ids("<|eot_id|>")
+            if isinstance(eot_id, int) and eot_id >= 0:
+                stop_ids.add(eot_id)
+            stop_ids.discard(None)
+            if not stop_ids:
+                raise InvalidModelOutputError("N-ATLaS tokenizer has no usable stop token.")
 
-            # Common semantic labels usually tokenize to one token. Their ranking only needs the
-            # next-token logits after the shared prompt, so the prompt is evaluated once.
-            if all(len(token_ids) == 1 for token_ids in choice_ids):
-                inputs = {name: value.to(model_device) for name, value in prompt_inputs.items()}
-                with torch.no_grad():
-                    try:
-                        output = self._model(
-                            **inputs,
-                            logits_to_keep=1,
-                            use_cache=False,
-                        )
-                    except TypeError:
-                        # Compatibility with older Transformers versions.
-                        output = self._model(**inputs, use_cache=False)
+            def allowed_tokens(_batch_id, input_ids):
+                generated = input_ids[prompt_length:].tolist()
+                allowed: set[int] = set()
 
-                next_logits = output.logits[0, -1].float()
-                scores = [next_logits[token_ids[0]].item() for token_ids in choice_ids]
-            else:
-                pad_id = self._tokenizer.pad_token_id
-                if pad_id is None:
-                    pad_id = self._tokenizer.eos_token_id
-                if pad_id is None:
-                    raise InvalidModelOutputError("N-ATLaS tokenizer has no pad/eos token.")
+                for token_ids in candidate_ids:
+                    if token_ids[: len(generated)] != generated:
+                        continue
+                    if len(generated) < len(token_ids):
+                        allowed.add(token_ids[len(generated)])
+                    else:
+                        allowed.update(stop_ids)
 
-                max_choice_length = max(len(token_ids) for token_ids in choice_ids)
-                max_length = len(prompt_ids) + max_choice_length
-                batch = torch.full(
-                    (len(normalized_choices), max_length),
-                    pad_id,
-                    dtype=torch.long,
-                )
-                attention = torch.zeros_like(batch)
+                if not allowed:
+                    allowed.update(stop_ids)
+                return sorted(allowed)
 
-                for row, token_ids in enumerate(choice_ids):
-                    sequence = prompt_ids + token_ids
-                    batch[row, : len(sequence)] = torch.tensor(sequence, dtype=torch.long)
-                    attention[row, : len(sequence)] = 1
-
-                batch = batch.to(model_device)
-                attention = attention.to(model_device)
-                logits_to_keep = max_choice_length + 1
-
-                with torch.no_grad():
-                    try:
-                        output = self._model(
-                            input_ids=batch,
-                            attention_mask=attention,
-                            logits_to_keep=logits_to_keep,
-                            use_cache=False,
-                        )
-                    except TypeError:
-                        output = self._model(
-                            input_ids=batch,
-                            attention_mask=attention,
-                            use_cache=False,
-                        )
-
-                logits = output.logits.float()
-                logits_start = max_length - logits.shape[1]
-                log_probs = torch.log_softmax(logits, dim=-1)
-
-                scores = []
-                prompt_length = len(prompt_ids)
-                for row, token_ids in enumerate(choice_ids):
-                    token_scores = [
-                        log_probs[
-                            row,
-                            prompt_length + offset - 1 - logits_start,
-                            token_id,
-                        ].item()
-                        for offset, token_id in enumerate(token_ids)
-                    ]
-                    scores.append(sum(token_scores) / len(token_scores))
-
-            best_index = max(range(len(scores)), key=scores.__getitem__)
-            LOGGER.debug(
-                "natlas_closed_set_scores choices=%s scores=%s selected=%s",
-                list(normalized_choices),
-                [round(score, 4) for score in scores],
-                normalized_choices[best_index],
+            max_new_tokens = max(len(token_ids) for token_ids in candidate_ids) + 1
+            output = self._model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                use_cache=True,
+                prefix_allowed_tokens_fn=allowed_tokens,
+                eos_token_id=sorted(stop_ids),
+                pad_token_id=self._tokenizer.eos_token_id,
             )
-            return normalized_choices[best_index]
+
+            generated_ids = output[0][prompt_length:].tolist()
+            while generated_ids and generated_ids[-1] in stop_ids:
+                generated_ids.pop()
+
+            matches = [
+                choice
+                for choice, token_ids in zip(
+                    normalized_choices,
+                    candidate_ids,
+                    strict=True,
+                )
+                if generated_ids == token_ids
+            ]
+            if len(matches) != 1:
+                raw = self._tokenizer.decode(
+                    output[0][prompt_length:],
+                    skip_special_tokens=True,
+                )
+                raise InvalidModelOutputError(
+                    f"N-ATLaS constrained classification did not resolve uniquely: {raw!r}"
+                )
+
+            LOGGER.debug("natlas_constrained_choice selected=%s", matches[0])
+            return matches[0]
         except (InvalidModelOutputError, ValueError):
             raise
         except Exception as exc:
-            raise ModelUnavailableError("N-ATLaS closed-set classification failed.") from exc
+            raise ModelUnavailableError("N-ATLaS constrained classification failed.") from exc
+
+
+def _orthographic_language_hint(question: str) -> Language | None:
+    """Return a language only when distinctive orthography gives one unambiguous signal."""
+    text = unicodedata.normalize("NFC", question.casefold())
+    marker_sets = {
+        Language.HAUSA: set("ɓɗƙƴ".casefold()),
+        Language.YORUBA: {"ṣ", "ẹ"},
+        Language.IGBO: {"ị", "ụ", "ṅ"},
+    }
+    matches = [
+        language
+        for language, markers in marker_sets.items()
+        if any(marker in text for marker in markers)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 class NatlasLanguageDetector:
@@ -326,47 +339,24 @@ class NatlasLanguageDetector:
             tuple(_LANGUAGE_BY_CHOICE),
         )
         try:
-            return _LANGUAGE_BY_CHOICE[choice]
+            model_language = _LANGUAGE_BY_CHOICE[choice]
         except KeyError as exc:
             raise InvalidModelOutputError(
                 f"N-ATLaS returned an unknown language choice {choice!r}."
             ) from exc
 
+        orthographic_hint = _orthographic_language_hint(question)
+        if orthographic_hint is not None and orthographic_hint is not model_language:
+            LOGGER.info(
+                "language_orthography_override model=%s orthography=%s",
+                model_language.value,
+                orthographic_hint.value,
+            )
+            return orthographic_hint
+        return model_language
 
-def _route_decision(label: RouteLabel, *, language: Language, question: str) -> RoutingDecision:
-    portal = {
-        RouteLabel.LMS_HOME: PortalAction.MAIN,
-        RouteLabel.SIGN_IN: PortalAction.LOGIN,
-        RouteLabel.NCAIR_HOME: PortalAction.NCAIR_HOME,
-        RouteLabel.REGISTER: PortalAction.REGISTER,
-        RouteLabel.PROFILE: PortalAction.PROFILE,
-        RouteLabel.COURSES: PortalAction.COURSES,
-        RouteLabel.TRACK_SELECTION: PortalAction.TRACK_SELECTION,
-        RouteLabel.SUPPORT: PortalAction.SUPPORT,
-    }
-    steps = {
-        RouteLabel.STEP_1: 1,
-        RouteLabel.STEP_2: 2,
-        RouteLabel.STEP_3: 3,
-        RouteLabel.STEP_4: 4,
-    }
 
-    if label in portal:
-        return RoutingDecision(
-            language=language,
-            tool=ToolName.PORTAL_LINK,
-            action=portal[label],
-            status=RoutingStatus.MODEL,
-        ).validate()
-
-    if label in steps:
-        return RoutingDecision(
-            language=language,
-            tool=ToolName.STEP_GUIDANCE,
-            step=steps[label],
-            status=RoutingStatus.MODEL,
-        ).validate()
-
+def _knowledge_decision(*, language: Language, question: str) -> RoutingDecision:
     return RoutingDecision(
         language=language,
         tool=ToolName.KNOWLEDGE,
@@ -386,23 +376,64 @@ class NatlasRouter:
 
     def route(self, question: str) -> RoutingDecision:
         language = self._language_detector.detect(question)
-        choice = self._client.choose(
+
+        outcome_choice = self._client.choose(
             [
-                {"role": "system", "content": ROUTE_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Detected language: {language.value}\nRequest: {question}",
-                },
+                {"role": "system", "content": OUTCOME_SYSTEM_PROMPT},
+                {"role": "user", "content": question},
             ],
-            _ROUTE_CHOICES,
+            tuple(kind.value for kind in OutcomeKind),
         )
         try:
-            label = RouteLabel(choice)
+            outcome = OutcomeKind(outcome_choice)
         except ValueError as exc:
             raise InvalidModelOutputError(
-                f"N-ATLaS returned an unknown route choice {choice!r}."
+                f"N-ATLaS returned an unknown outcome choice {outcome_choice!r}."
             ) from exc
-        return _route_decision(label, language=language, question=question)
+
+        if outcome is OutcomeKind.KNOWLEDGE:
+            return _knowledge_decision(language=language, question=question)
+
+        if outcome is OutcomeKind.NAVIGATION:
+            page_choice = self._client.choose(
+                [
+                    {"role": "system", "content": PAGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                ],
+                tuple(label.value for label in PageLabel),
+            )
+            try:
+                page = PageLabel(page_choice)
+            except ValueError as exc:
+                raise InvalidModelOutputError(
+                    f"N-ATLaS returned an unknown page choice {page_choice!r}."
+                ) from exc
+            return RoutingDecision(
+                language=language,
+                tool=ToolName.PORTAL_LINK,
+                action=_PAGE_ACTIONS[page],
+                status=RoutingStatus.MODEL,
+            ).validate()
+
+        step_choice = self._client.choose(
+            [
+                {"role": "system", "content": STEP_SYSTEM_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            tuple(label.value for label in StepLabel),
+        )
+        try:
+            step = StepLabel(step_choice)
+        except ValueError as exc:
+            raise InvalidModelOutputError(
+                f"N-ATLaS returned an unknown step choice {step_choice!r}."
+            ) from exc
+        return RoutingDecision(
+            language=language,
+            tool=ToolName.STEP_GUIDANCE,
+            step=_STEP_NUMBERS[step],
+            status=RoutingStatus.MODEL,
+        ).validate()
 
 
 class NatlasGroundedAnswerer:
