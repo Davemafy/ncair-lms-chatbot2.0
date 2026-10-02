@@ -4,12 +4,8 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .validate_benchmark import (
-    ALLOWED_TOOLS,
-    BENCHMARK_PATH,
-    PORTAL_ACTIONS,
-    load_records as load_benchmark_records,
-)
+from .validate_benchmark import ALLOWED_TOOLS, BENCHMARK_PATH, PORTAL_ACTIONS
+from .validate_benchmark import load_records as load_benchmark_records
 
 HOLDOUT_PATH = Path(__file__).with_name("holdout.jsonl")
 EXPECTED_LANGUAGES = {"english": 8, "hausa": 8, "yoruba": 8, "igbo": 8}
