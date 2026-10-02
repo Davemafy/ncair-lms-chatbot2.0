@@ -19,13 +19,13 @@ flowchart LR
     D --> H[N-ATLaS grounded response]
     E --> H
     G --> I[BGE multilingual reranker]
-    I --> J[N-ATLaS evidence verifier]
-    J -->|supported| H
-    J -->|unsupported| K[Safe abstention]
+    I --> J[N-ATLaS relation + exact evidence quote]
+    J -->|supported / contradicted + valid quote| H
+    J -->|not found / invalid quote| K[Safe abstention]
     H --> L[Answer in user's language]
 ```
 
-V2 is contract-first rather than benchmark-first. The two specialized tools have observable preconditions: numbered-step guidance requires an explicit step 1–4, while portal navigation requires an explicit navigation request plus a known destination. Those arguments are resolved deterministically from the product's supported language/domain vocabulary. Ambiguous requests still go through N-ATLaS, but a model-proposed specialized tool is accepted only when its documented precondition is present; otherwise the request safely falls back to knowledge search. Language identification uses distinctive orthography and common function-word anchors for the four supported languages, with N-ATLaS as the fallback when those signals are ambiguous. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by calibrated reranker score/margin thresholds rather than a second generative evidence judge. N-ATLaS is used again only to verbalize verified evidence in the user's language.
+V2 is contract-first rather than benchmark-first. The two specialized tools have observable preconditions: numbered-step guidance requires an explicit step 1–4, while portal navigation requires an explicit navigation request plus a known destination. Those arguments are resolved deterministically from the product's supported language/domain vocabulary. Ambiguous requests still go through N-ATLaS, but a model-proposed specialized tool is accepted only when its documented precondition is present; otherwise the request safely falls back to knowledge search. Language identification uses distinctive orthography and common function-word anchors for the four supported languages, with N-ATLaS as the fallback when those signals are ambiguous. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by a quote-backed N-ATLaS evidence relation check. The verifier must classify the evidence as supported, contradicted, or not found and, for the first two outcomes, copy an exact contiguous quote from the retrieved official evidence. The runtime validates that quote before allowing an answer. Reranker scores are kept for ranking and diagnostics, not as a tuned truth threshold. N-ATLaS is then used to verbalize only verified evidence in the user's language.
 
 ### V1 — comparison baseline
 
@@ -248,5 +248,5 @@ The Python V2 is the source of truth for assignment evaluation.
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
 - V1 still uses the original English MiniLM chunk index. V2 uses `intfloat/multilingual-e5-base` with the required query/passage prefixes, then `BAAI/bge-reranker-v2-m3` for multilingual reranking.
-- V2 specialized routes are accepted only when their product-level preconditions are explicit. N-ATLaS handles ambiguous semantic routing and verifies retrieved evidence. Reranker scores are not used as a benchmark-tuned truth threshold.
+- V2 specialized routes are accepted only when their product-level preconditions are explicit. N-ATLaS handles ambiguous semantic routing. Knowledge support requires a supported/contradicted relation plus an exact quote copied from retrieved official evidence; missing or malformed evidence fails closed. Reranker scores are not used as a benchmark-tuned truth threshold.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
