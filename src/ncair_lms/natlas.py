@@ -29,14 +29,19 @@ outcome. Return exactly one JSON object and no prose:
 {"tool":"get_portal_link|get_step_guidance|search_ncair_knowledge_base"}
 
 Tool contracts:
-- get_portal_link: only when the user wants a page, URL, link, website, or portal destination.
-- get_step_guidance: only when the user explicitly asks about numbered onboarding step 1-4.
+- get_portal_link: when the requested outcome is navigation to an LMS/NCAIR destination or
+  interface. This includes indirect navigation requests asking where or how to reach the place
+  used to sign in, edit a profile, choose a track, view courses, register, or get support.
+- get_step_guidance: when the user asks what to do at one specific onboarding stage among 1-4.
+  The stage may be expressed as a digit, an ordinal word, or the equivalent wording in the
+  user's language; the literal word "step" is not required.
 - search_ncair_knowledge_base: facts, policies, requirements, schedules, explanations,
   troubleshooting, claim verification, and questions whose answer may be undocumented.
 
-Classify the requested outcome rather than topic words. A question about login, registration,
-courses, profile, support, or another portal topic is still knowledge search when the user wants
-information about it rather than the page itself.
+Classify the requested outcome rather than topic words. A factual question about login,
+registration, courses, profile, support, or another portal topic is still knowledge search when
+the user wants information rather than navigation. If the user asks how/where to reach the
+interface itself, choose get_portal_link.
 """
 
 PORTAL_SYSTEM_PROMPT = """The user explicitly wants an NCAIR/LMS destination. Return exactly one
@@ -490,7 +495,7 @@ def _language_hint(question: str) -> tuple[Language | None, int]:
     if re.search(r"[àáèéìíòóùú]", normalized) and scores[Language.YORUBA] > 0:
         scores[Language.YORUBA] += 1
     ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-    if not ranked or ranked[0][1] == 0:
+    if not ranked or ranked[0][1] < 2:
         return None, 0
     margin = ranked[0][1] - ranked[1][1]
     if margin <= 0:
