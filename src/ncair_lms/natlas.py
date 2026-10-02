@@ -610,8 +610,9 @@ class NatlasEvidenceVerifier:
             )
             try:
                 return _parse_supported(retry)
-            except InvalidModelOutputError as retry_error:
-                raise retry_error from first_error
+            except InvalidModelOutputError:
+                LOGGER.warning("natlas_invalid_evidence_retry raw=%r", retry[:1000])
+                return False
 
 
 class NatlasGroundedAnswerer:
