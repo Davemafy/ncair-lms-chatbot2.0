@@ -10,7 +10,7 @@ from ncair_lms.models import ToolName
 from ncair_lms.service import AssistantService
 
 from .metrics import summarize
-from .validate_benchmark import load_records, validate_records
+from .validate_benchmark import BENCHMARK_PATH, load_records, validate_records
 
 RESULTS_DIR = Path(__file__).with_name("results")
 
@@ -30,9 +30,10 @@ def _argument_correct(record: dict, actual: dict) -> bool:
     return actual == expected
 
 
-def run(version: str, mode: str) -> dict:
-    records = load_records()
-    validate_records(records)
+def run(version: str, mode: str, *, dataset: Path = BENCHMARK_PATH) -> dict:
+    records = load_records(dataset)
+    if dataset.resolve() == BENCHMARK_PATH.resolve():
+        validate_records(records)
     service = AssistantService(version)
     results = []
 
@@ -92,7 +93,10 @@ def run(version: str, mode: str) -> dict:
     }
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    path = RESULTS_DIR / f"{version}-{mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    dataset_label = "" if dataset.resolve() == BENCHMARK_PATH.resolve() else f"-{dataset.stem}"
+    path = RESULTS_DIR / (
+        f"{version}-{mode}{dataset_label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    )
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"path": str(path), "metrics": payload["metrics"]}
 
@@ -101,9 +105,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", choices=["v1", "v2"], required=True)
     parser.add_argument("--mode", choices=["routing", "full"], default="routing")
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=BENCHMARK_PATH,
+        help="JSONL evaluation dataset; defaults to the frozen 60-case regression set.",
+    )
     args = parser.parse_args()
 
-    output = run(args.version, args.mode)
+    output = run(args.version, args.mode, dataset=args.dataset)
     print(json.dumps(output, indent=2))
 
 
