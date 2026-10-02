@@ -10,23 +10,22 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 
 ```mermaid
 flowchart LR
-    A[User text] --> B[N-ATLaS constrained language label]
-    B --> C[N-ATLaS outcome: navigation / step / knowledge]
-    C -->|navigation| D[N-ATLaS page destination]
-    C -->|step| E[N-ATLaS step number]
-    C -->|knowledge| G[Multilingual E5 + FAISS]
-    D --> F[get_portal_link]
-    E --> H[get_step_guidance]
+    A[User text] --> B[Language anchors + N-ATLaS fallback]
+    B --> C{Tool contract guard}
+    C -->|explicit page intent| D[get_portal_link]
+    C -->|explicit numbered step| E[get_step_guidance]
+    C -->|ambiguous| F[N-ATLaS 3-tool semantic router]
+    F -->|knowledge / invalid specialized precondition| G[Multilingual E5 + FAISS]
+    D --> H[N-ATLaS grounded response]
+    E --> H
     G --> I[BGE multilingual reranker]
-    I --> J{Calibrated support threshold}
-    J -->|supported| K[N-ATLaS grounded answer]
-    J -->|unsupported| L[Safe abstention]
-    F --> K
-    H --> K
-    K --> M[Answer in user's language]
+    I --> J[N-ATLaS evidence verifier]
+    J -->|supported| H
+    J -->|unsupported| K[Safe abstention]
+    H --> L[Answer in user's language]
 ```
 
-V2 treats language and routing as constrained semantic classification instead of free-form tool generation. N-ATLaS can only emit allowed labels. Routing is hierarchical: first classify the requested outcome as navigation, numbered-step guidance, or a knowledge answer; only navigation and step requests trigger a second small classification for the exact destination or step. Those labels map deterministically to portal actions, step numbers, or knowledge search, so invalid JSON and argument drift are eliminated. Distinctive Hausa, Yoruba, and Igbo orthography is used only as a conservative consistency check on the N-ATLaS language decision. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by calibrated reranker score/margin thresholds rather than a second generative evidence judge. N-ATLaS is used again only to verbalize verified evidence in the user's language.
+V2 is contract-first rather than benchmark-first. The two specialized tools have observable preconditions: numbered-step guidance requires an explicit step 1–4, while portal navigation requires an explicit navigation request plus a known destination. Those arguments are resolved deterministically from the product's supported language/domain vocabulary. Ambiguous requests still go through N-ATLaS, but a model-proposed specialized tool is accepted only when its documented precondition is present; otherwise the request safely falls back to knowledge search. Language identification uses distinctive orthography and common function-word anchors for the four supported languages, with N-ATLaS as the fallback when those signals are ambiguous. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by calibrated reranker score/margin thresholds rather than a second generative evidence judge. N-ATLaS is used again only to verbalize verified evidence in the user's language.
 
 ### V1 — comparison baseline
 
@@ -69,7 +68,7 @@ python -m pip install -e ".[runtime,dev]"
 
 ## Configuration
 
-`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` V1 retrieval similarity, a development-calibrated V2 reranker support threshold of `0.03`, and the original Ollama V1 model. `HF_TOKEN` has no default secret value and is optional for public model access.
+`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` V1 retrieval similarity, and the original Ollama V1 model. V2 reranker scores are used for ranking/diagnostics rather than as a tuned support cutoff; N-ATLaS verifies whether the retrieved official evidence actually answers the question. `HF_TOKEN` has no default secret value and is optional for public model access.
 
 Environment files are never committed.
 
@@ -216,7 +215,7 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 | Concern | V1 | V2 |
 | --- | --- | --- |
-| Router | keyword/sub-string rules | N-ATLaS hierarchical constrained semantic routing |
+| Router | keyword/sub-string rules | contract guards + N-ATLaS 3-tool semantic fallback |
 | Languages | English-oriented baseline | English, Hausa, Yoruba, Igbo |
 | Tools | same three concepts | same three canonical tools |
 | Knowledge | chunked FAISS official evidence | atomic multilingual FAISS + BGE reranking |
@@ -249,5 +248,5 @@ The Python V2 is the source of truth for assignment evaluation.
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
 - V1 still uses the original English MiniLM chunk index. V2 uses `intfloat/multilingual-e5-base` with the required query/passage prefixes, then `BAAI/bge-reranker-v2-m3` for multilingual reranking.
-- V2 route and language decisions use constrained decoding over semantic labels rather than generated JSON or opaque label codes. Knowledge support is a calibrated reranker decision; `RERANK_MIN_SCORE` and `RERANK_MIN_MARGIN` are development-calibrated and must be frozen before final evaluation.
+- V2 specialized routes are accepted only when their product-level preconditions are explicit. N-ATLaS handles ambiguous semantic routing and verifies retrieved evidence. Reranker scores are not used as a benchmark-tuned truth threshold.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
