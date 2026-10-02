@@ -45,6 +45,16 @@ JSON object and no prose:
 Choose the destination that best matches the request. Do not answer the request.
 """
 
+EVIDENCE_QUERY_SYSTEM_PROMPT = """Rewrite the user's information need as one concise English
+verification statement or question. Preserve every important constraint: numbers, dates, file
+types, negation, modality, and any claim the user is asking you to confirm or reject.
+
+Return exactly one JSON object and no prose:
+{"question_en":"<concise English verification query>"}
+
+Do not answer the question. Do not add facts that are not in the user's request.
+"""
+
 EVIDENCE_SYSTEM_PROMPT = """Determine the relation between the user's information need and the
 supplied official NCAIR evidence passages. Return exactly one JSON object and no prose:
 {"verdict":"supported|contradicted|not_found","passage_index":1}
@@ -599,6 +609,14 @@ def _indexed_evidence(evidence: str) -> tuple[str, int]:
     return rendered, len(passages)
 
 
+def _parse_verification_query(raw: str) -> str:
+    payload = _json_object(raw)
+    question_en = payload.get("question_en")
+    if not isinstance(question_en, str) or not question_en.strip():
+        raise InvalidModelOutputError("N-ATLaS returned an invalid verification query.")
+    return question_en.strip()
+
+
 def _parse_evidence_verdict(raw: str, *, passage_count: int) -> bool:
     payload = _json_object(raw)
     verdict = str(payload.get("verdict", "")).strip().lower()
@@ -798,17 +816,57 @@ class NatlasEvidenceVerifier:
     def __init__(self, client: NatlasTextClient):
         self._client = client
 
+    def _normalize_question(self, question: str) -> str:
+        messages = [
+            {"role": "system", "content": EVIDENCE_QUERY_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
+        raw = self._client.generate(messages, max_new_tokens=80)
+        try:
+            return _parse_verification_query(raw)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning(
+                "natlas_invalid_verification_query error=%s raw=%r",
+                first_error,
+                raw[:1000],
+            )
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Return only the required JSON with one concise English question_en. "
+                            "Do not answer the question."
+                        ),
+                    },
+                ],
+                max_new_tokens=80,
+            )
+            try:
+                return _parse_verification_query(retry)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning(
+                    "natlas_invalid_verification_query_retry error=%s raw=%r",
+                    retry_error,
+                    retry[:1000],
+                )
+                return question
+
     def is_supported(self, *, question: str, evidence: str) -> bool:
         indexed_evidence, passage_count = _indexed_evidence(evidence)
         if passage_count == 0:
             return False
 
+        question_en = self._normalize_question(question)
         messages = [
             {"role": "system", "content": EVIDENCE_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
-                    f"Question:\n{question}\n\n"
+                    f"Original question:\n{question}\n\n"
+                    f"English verification query:\n{question_en}\n\n"
                     f"Official evidence passages:\n{indexed_evidence}"
                 ),
             },
