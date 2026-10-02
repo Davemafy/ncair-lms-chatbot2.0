@@ -280,10 +280,17 @@ def _words(text: str) -> list[str]:
 
 def _language_hint(question: str) -> tuple[Language | None, int]:
     words = _words(question)
-    scores = {
-        language: sum(word in lexicon for word in words)
-        for language, lexicon in _LANGUAGE_LEXICON.items()
-    }
+    ownership: dict[str, list[Language]] = {}
+    for language, lexicon in _LANGUAGE_LEXICON.items():
+        for word in lexicon:
+            ownership.setdefault(word, []).append(language)
+
+    scores = dict.fromkeys(Language, 0)
+    for word in words:
+        owners = ownership.get(word, [])
+        if len(owners) == 1:
+            scores[owners[0]] += 1
+
     normalized = unicodedata.normalize("NFC", question.casefold())
     if re.search(r"[ɓɗƙƴ]", normalized):
         scores[Language.HAUSA] += 5
@@ -414,18 +421,10 @@ class NatlasLanguageDetector:
 
     def detect(self, question: str) -> Language:
         hint, margin = _language_hint(question)
-        if hint is not None and margin >= 2:
+        if hint is not None and margin > 0:
+            LOGGER.debug("language_lexical_hint language=%s margin=%s", hint.value, margin)
             return hint
-        model_language = self._model_detect(question)
-        if hint is not None and margin >= 1 and hint is not model_language:
-            LOGGER.info(
-                "language_lexical_reconciliation model=%s hint=%s margin=%s",
-                model_language.value,
-                hint.value,
-                margin,
-            )
-            return hint
-        return model_language
+        return self._model_detect(question)
 
 
 class NatlasRouter:
@@ -509,8 +508,9 @@ class NatlasRouter:
 
     def route(self, question: str) -> RoutingDecision:
         language = self._language_detector.detect(question)
-        model_tool = self._model_tool(question, language=language)
 
+        # Specialized tools have explicit contracts. Resolve those contracts before asking the
+        # model so malformed model output cannot break an otherwise unambiguous request.
         step = _explicit_step(question)
         if step is not None:
             return RoutingDecision(
@@ -530,6 +530,14 @@ class NatlasRouter:
                 status=RoutingStatus.MODEL,
             ).validate()
 
+        # For ambiguous requests, N-ATLaS remains the semantic router. The deterministic contract
+        # validator may only make a specialized decision stricter, never invent one.
+        try:
+            model_tool = self._model_tool(question, language=language)
+        except InvalidModelOutputError:
+            LOGGER.warning("natlas_tool_fallback_to_knowledge")
+            return self._knowledge(language, question)
+
         if model_tool is ToolName.KNOWLEDGE:
             return self._knowledge(language, question)
         if model_tool is ToolName.STEP_GUIDANCE:
@@ -537,7 +545,11 @@ class NatlasRouter:
         if not navigation_intent:
             return self._knowledge(language, question)
 
-        action = portal_action or self._model_portal_action(question)
+        try:
+            action = self._model_portal_action(question)
+        except InvalidModelOutputError:
+            return self._knowledge(language, question)
+
         return RoutingDecision(
             language=language,
             tool=ToolName.PORTAL_LINK,
