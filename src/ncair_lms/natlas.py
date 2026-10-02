@@ -45,13 +45,23 @@ JSON object and no prose:
 Choose the destination that best matches the request. Do not answer the request.
 """
 
-EVIDENCE_SYSTEM_PROMPT = """Decide whether the supplied official NCAIR evidence directly answers
-the user's information need. Return exactly one JSON object and no prose:
-{"supported":true|false}
+EVIDENCE_SYSTEM_PROMPT = """Determine the relation between the user's information need and the
+supplied official NCAIR evidence. Return exactly one JSON object and no prose:
+{"verdict":"supported|contradicted|not_found","evidence_quote":"<exact quote or empty>"}
 
-Use only the supplied evidence. Return true when the requested fact is explicitly present or the
-evidence directly corrects the user's claim. Different wording is fine. Return false for topical
-similarity, missing facts, guesses, or evidence that does not actually answer the question.
+Definitions:
+- supported: the evidence explicitly states the requested fact or directly answers the question.
+- contradicted: the user proposes or assumes a claim that the evidence explicitly rules out.
+- not_found: the requested fact is absent, only topically related, or would require inference.
+
+Rules:
+- Use only the supplied evidence.
+- Do not treat missing information as a negative fact.
+- Do not infer a policy, entitlement, requirement, date, payment, contact, or facility from
+  related evidence.
+- For supported or contradicted, evidence_quote must be a short exact contiguous quote copied
+  from the supplied evidence that is sufficient for the verdict. Do not paraphrase it.
+- For not_found, evidence_quote must be an empty string.
 """
 
 _LANGUAGE_LEXICON = {
@@ -517,7 +527,21 @@ def _has_navigation_intent(question: str) -> bool:
 
 
 def _explicit_portal_action(question: str) -> PortalAction | None:
-    folded = f" {_fold(question)} "
+    folded_core = _fold(question)
+
+    # Resolve the public NCAIR website semantically rather than depending on one exact possessive
+    # form. This covers "NCAIR's official website", "official NCAIR website", and similar wording
+    # without turning generic LMS mentions into the public-site action.
+    if re.search(
+        r"\bncair(?:\s+s)?\s+(?:official\s+)?(?:website|site)\b",
+        folded_core,
+    ) or re.search(
+        r"\b(?:official\s+)?(?:website|site)\s+(?:of\s+)?ncair\b",
+        folded_core,
+    ):
+        return PortalAction.NCAIR_HOME
+
+    folded = f" {folded_core} "
     for action, terms in _PORTAL_TERMS.items():
         for term in terms:
             if f" {_fold(term)} " in folded:
@@ -562,11 +586,35 @@ def _parse_portal_action(raw: str) -> PortalAction:
     return PortalAction.LOGIN if action is PortalAction.SIGNIN else action
 
 
-def _parse_supported(raw: str) -> bool:
-    supported = _json_object(raw).get("supported")
-    if not isinstance(supported, bool):
-        raise InvalidModelOutputError("N-ATLaS evidence verdict must contain a boolean.")
-    return supported
+def _normalized_evidence_text(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def _parse_evidence_verdict(raw: str, *, evidence: str) -> bool:
+    payload = _json_object(raw)
+    verdict = str(payload.get("verdict", "")).strip().lower()
+    quote = payload.get("evidence_quote")
+
+    if verdict not in {"supported", "contradicted", "not_found"}:
+        raise InvalidModelOutputError("N-ATLaS returned an invalid evidence verdict.")
+    if not isinstance(quote, str):
+        raise InvalidModelOutputError("N-ATLaS evidence verdict must include evidence_quote.")
+
+    quote = quote.strip()
+    if verdict == "not_found":
+        if quote:
+            raise InvalidModelOutputError("not_found must use an empty evidence_quote.")
+        return False
+
+    if not quote:
+        raise InvalidModelOutputError("Supported evidence verdicts require an exact quote.")
+
+    normalized_quote = _normalized_evidence_text(quote)
+    normalized_evidence = _normalized_evidence_text(evidence)
+    if not normalized_quote or normalized_quote not in normalized_evidence:
+        raise InvalidModelOutputError("Evidence quote was not copied from the supplied evidence.")
+
+    return True
 
 
 class NatlasLanguageDetector:
@@ -753,26 +801,38 @@ class NatlasEvidenceVerifier:
                 "content": f"Question:\n{question}\n\nOfficial evidence:\n{evidence}",
             },
         ]
-        raw = self._client.generate(messages, max_new_tokens=40)
+        raw = self._client.generate(messages, max_new_tokens=120)
         try:
-            return _parse_supported(raw)
-        except InvalidModelOutputError:
-            LOGGER.warning("natlas_invalid_evidence_output raw=%r", raw[:1000])
+            return _parse_evidence_verdict(raw, evidence=evidence)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning(
+                "natlas_invalid_evidence_output error=%s raw=%r",
+                first_error,
+                raw[:1000],
+            )
             retry = self._client.generate(
                 [
                     *messages,
                     {"role": "assistant", "content": raw},
                     {
                         "role": "user",
-                        "content": 'Return only {"supported":true} or {"supported":false}.',
+                        "content": (
+                            "The previous verdict was invalid. Return only the required JSON. "
+                            "For supported or contradicted, copy a short exact contiguous quote "
+                            "from the supplied evidence. For not_found, use an empty quote."
+                        ),
                     },
                 ],
-                max_new_tokens=40,
+                max_new_tokens=120,
             )
             try:
-                return _parse_supported(retry)
-            except InvalidModelOutputError:
-                LOGGER.warning("natlas_invalid_evidence_retry raw=%r", retry[:1000])
+                return _parse_evidence_verdict(retry, evidence=evidence)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning(
+                    "natlas_invalid_evidence_retry error=%s raw=%r",
+                    retry_error,
+                    retry[:1000],
+                )
                 return False
 
 
