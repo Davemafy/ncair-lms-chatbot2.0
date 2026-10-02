@@ -228,9 +228,7 @@ class LocalNatlasClient:
             # Common semantic labels usually tokenize to one token. Their ranking only needs the
             # next-token logits after the shared prompt, so the prompt is evaluated once.
             if all(len(token_ids) == 1 for token_ids in choice_ids):
-                inputs = {
-                    name: value.to(model_device) for name, value in prompt_inputs.items()
-                }
+                inputs = {name: value.to(model_device) for name, value in prompt_inputs.items()}
                 with torch.no_grad():
                     try:
                         output = self._model(
