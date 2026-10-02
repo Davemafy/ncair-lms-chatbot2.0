@@ -85,6 +85,35 @@ def test_explicit_step_extraction_is_structural(question, step):
 
 
 @pytest.mark.parametrize(
+    ("question", "step"),
+    [
+        ("What happens at onboarding stage two?", 2),
+        ("Bayyana mataki na farko.", 1),
+        ("Ṣàlàyé ìgbésẹ̀ kẹta.", 3),
+        ("Kọwaa nzọụkwụ nke anọ.", 4),
+    ],
+)
+def test_explicit_step_supports_multilingual_ordinals(question, step):
+    assert _explicit_step(question) == step
+
+
+@pytest.mark.parametrize(
+    ("question", "action"),
+    [
+        ("Where can I enter my login credentials?", PortalAction.LOGIN),
+        ("Take me to the screen where I edit my intern details.", PortalAction.PROFILE),
+        ("I want the screen for choosing my learning track.", PortalAction.TRACK_SELECTION),
+        ("Ina zan samu shafin taimako?", PortalAction.SUPPORT),
+        ("Ṣí ojú-ewe course fún mi.", PortalAction.COURSES),
+        ("Kpọga m na ibe profaịlụ.", PortalAction.PROFILE),
+    ],
+)
+def test_explicit_navigation_supports_destination_semantics(question, action):
+    assert _has_navigation_intent(question)
+    assert _explicit_portal_action(question) is action
+
+
+@pytest.mark.parametrize(
     ("question", "action"),
     [
         ("Open the LMS sign in page.", PortalAction.LOGIN),
@@ -132,7 +161,10 @@ def test_router_canonicalizes_explicit_navigation_even_if_model_misroutes():
 
 
 def test_router_uses_model_step_when_fast_path_does_not_match():
-    client = FakeClient('{"tool":"get_step_guidance","step":2}')
+    client = FakeClient(
+        '{"tool":"get_step_guidance"}',
+        '{"step":2}',
+    )
     router = NatlasRouter(client)
 
     decision = router.route("What happens at the second onboarding stage?")
@@ -142,7 +174,10 @@ def test_router_uses_model_step_when_fast_path_does_not_match():
 
 
 def test_router_uses_model_portal_when_fast_path_does_not_match():
-    client = FakeClient('{"tool":"get_portal_link","action":"login"}')
+    client = FakeClient(
+        '{"tool":"get_portal_link"}',
+        '{"action":"login"}',
+    )
     router = NatlasRouter(client)
 
     decision = router.route("I need somewhere to enter my credentials.")
