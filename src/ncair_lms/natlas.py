@@ -46,22 +46,22 @@ Choose the destination that best matches the request. Do not answer the request.
 """
 
 EVIDENCE_SYSTEM_PROMPT = """Determine the relation between the user's information need and the
-supplied official NCAIR evidence. Return exactly one JSON object and no prose:
-{"verdict":"supported|contradicted|not_found","evidence_quote":"<exact quote or empty>"}
+supplied official NCAIR evidence passages. Return exactly one JSON object and no prose:
+{"verdict":"supported|contradicted|not_found","passage_index":1}
 
 Definitions:
-- supported: the evidence explicitly states the requested fact or directly answers the question.
-- contradicted: the user proposes or assumes a claim that the evidence explicitly rules out.
+- supported: one passage explicitly states the requested fact or directly answers the question.
+- contradicted: one passage explicitly rules out a claim the user proposes or assumes.
 - not_found: the requested fact is absent, only topically related, or would require inference.
 
 Rules:
-- Use only the supplied evidence.
+- Use only the numbered passages supplied below.
 - Do not treat missing information as a negative fact.
 - Do not infer a policy, entitlement, requirement, date, payment, contact, or facility from
   related evidence.
-- For supported or contradicted, evidence_quote must be a short exact contiguous quote copied
-  from the supplied evidence that is sufficient for the verdict. Do not paraphrase it.
-- For not_found, evidence_quote must be an empty string.
+- For supported or contradicted, passage_index must be the 1-based index of the single passage
+  that is sufficient for the verdict.
+- For not_found, passage_index must be null.
 """
 
 _LANGUAGE_LEXICON = {
@@ -586,33 +586,38 @@ def _parse_portal_action(raw: str) -> PortalAction:
     return PortalAction.LOGIN if action is PortalAction.SIGNIN else action
 
 
-def _normalized_evidence_text(text: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+def _split_evidence_passages(evidence: str) -> list[str]:
+    return [part.strip() for part in evidence.split("\n\n---\n\n") if part.strip()]
 
 
-def _parse_evidence_verdict(raw: str, *, evidence: str) -> bool:
+def _indexed_evidence(evidence: str) -> tuple[str, int]:
+    passages = _split_evidence_passages(evidence)
+    rendered = "\n\n".join(
+        f"PASSAGE {index}\n{passage}"
+        for index, passage in enumerate(passages, start=1)
+    )
+    return rendered, len(passages)
+
+
+def _parse_evidence_verdict(raw: str, *, passage_count: int) -> bool:
     payload = _json_object(raw)
     verdict = str(payload.get("verdict", "")).strip().lower()
-    quote = payload.get("evidence_quote")
+    passage_index = payload.get("passage_index")
 
     if verdict not in {"supported", "contradicted", "not_found"}:
         raise InvalidModelOutputError("N-ATLaS returned an invalid evidence verdict.")
-    if not isinstance(quote, str):
-        raise InvalidModelOutputError("N-ATLaS evidence verdict must include evidence_quote.")
 
-    quote = quote.strip()
     if verdict == "not_found":
-        if quote:
-            raise InvalidModelOutputError("not_found must use an empty evidence_quote.")
+        if passage_index is not None:
+            raise InvalidModelOutputError("not_found must use a null passage_index.")
         return False
 
-    if not quote:
-        raise InvalidModelOutputError("Supported evidence verdicts require an exact quote.")
-
-    normalized_quote = _normalized_evidence_text(quote)
-    normalized_evidence = _normalized_evidence_text(evidence)
-    if not normalized_quote or normalized_quote not in normalized_evidence:
-        raise InvalidModelOutputError("Evidence quote was not copied from the supplied evidence.")
+    if isinstance(passage_index, bool) or not isinstance(passage_index, int):
+        raise InvalidModelOutputError(
+            "Supported evidence verdicts require an integer passage_index."
+        )
+    if passage_index < 1 or passage_index > passage_count:
+        raise InvalidModelOutputError("Evidence passage_index is outside the supplied passages.")
 
     return True
 
@@ -794,16 +799,23 @@ class NatlasEvidenceVerifier:
         self._client = client
 
     def is_supported(self, *, question: str, evidence: str) -> bool:
+        indexed_evidence, passage_count = _indexed_evidence(evidence)
+        if passage_count == 0:
+            return False
+
         messages = [
             {"role": "system", "content": EVIDENCE_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Question:\n{question}\n\nOfficial evidence:\n{evidence}",
+                "content": (
+                    f"Question:\n{question}\n\n"
+                    f"Official evidence passages:\n{indexed_evidence}"
+                ),
             },
         ]
-        raw = self._client.generate(messages, max_new_tokens=120)
+        raw = self._client.generate(messages, max_new_tokens=80)
         try:
-            return _parse_evidence_verdict(raw, evidence=evidence)
+            return _parse_evidence_verdict(raw, passage_count=passage_count)
         except InvalidModelOutputError as first_error:
             LOGGER.warning(
                 "natlas_invalid_evidence_output error=%s raw=%r",
@@ -818,15 +830,15 @@ class NatlasEvidenceVerifier:
                         "role": "user",
                         "content": (
                             "The previous verdict was invalid. Return only the required JSON. "
-                            "For supported or contradicted, copy a short exact contiguous quote "
-                            "from the supplied evidence. For not_found, use an empty quote."
+                            "For supported or contradicted, choose one valid 1-based passage_index "
+                            "from the supplied passages. For not_found, use passage_index null."
                         ),
                     },
                 ],
-                max_new_tokens=120,
+                max_new_tokens=80,
             )
             try:
-                return _parse_evidence_verdict(retry, evidence=evidence)
+                return _parse_evidence_verdict(retry, passage_count=passage_count)
             except InvalidModelOutputError as retry_error:
                 LOGGER.warning(
                     "natlas_invalid_evidence_retry error=%s raw=%r",
