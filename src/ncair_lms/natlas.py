@@ -394,6 +394,16 @@ def _parse_sufficiency(raw: str) -> bool:
     return sufficient
 
 
+def _parse_knowledge_required(raw: str) -> bool:
+    payload = _json_object(raw)
+    knowledge_required = payload.get("knowledge_required")
+    if not isinstance(knowledge_required, bool):
+        raise InvalidModelOutputError(
+            "N-ATLaS escalation verdict must contain a knowledge_required boolean."
+        )
+    return knowledge_required
+
+
 def _parse_knowledge_query(raw: str) -> str:
     payload = _json_object(raw)
     query = payload.get("query")
@@ -546,11 +556,55 @@ class NatlasRouter:
                 LOGGER.warning("natlas_invalid_tool_sufficiency_retry raw=%r", retry[:1000])
                 raise retry_error from first_error
 
+    def _knowledge_required(
+        self,
+        question: str,
+        decision: RoutingDecision,
+    ) -> bool:
+        if decision.tool is ToolName.PORTAL_LINK:
+            candidate = f"get_portal_link(action={decision.action.value})"
+        else:
+            candidate = f"get_step_guidance(step={decision.step})"
+
+        messages = [
+            {"role": "system", "content": KNOWLEDGE_CHALLENGE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (f"User request:\n{question}\n\nCandidate tool call:\n{candidate}"),
+            },
+        ]
+        raw = self._client.generate(messages, max_new_tokens=40)
+
+        try:
+            return _parse_knowledge_required(raw)
+        except InvalidModelOutputError as first_error:
+            LOGGER.warning("natlas_invalid_escalation_verdict raw=%r", raw[:1000])
+            retry = self._client.generate(
+                [
+                    *messages,
+                    {"role": "assistant", "content": raw},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous verdict was invalid. Return only "
+                            '{"knowledge_required":true} or {"knowledge_required":false}.'
+                        ),
+                    },
+                ],
+                max_new_tokens=40,
+            )
+            try:
+                return _parse_knowledge_required(retry)
+            except InvalidModelOutputError as retry_error:
+                LOGGER.warning("natlas_invalid_escalation_retry raw=%r", retry[:1000])
+                raise retry_error from first_error
+
     def _knowledge_fallback(
         self,
         question: str,
         *,
         language: Language,
+        fallback_query: str | None = None,
     ) -> RoutingDecision:
         messages = [
             {"role": "system", "content": KNOWLEDGE_QUERY_SYSTEM_PROMPT},
@@ -583,7 +637,11 @@ class NatlasRouter:
                 query = _parse_knowledge_query(retry)
             except InvalidModelOutputError as retry_error:
                 LOGGER.warning("natlas_invalid_knowledge_query_retry raw=%r", retry[:1000])
-                raise retry_error from first_error
+                if fallback_query and fallback_query.strip():
+                    LOGGER.info("natlas_knowledge_query_fallback_to_router_query")
+                    query = fallback_query.strip()
+                else:
+                    raise retry_error from first_error
 
         return RoutingDecision(
             language=language,
@@ -596,15 +654,34 @@ class NatlasRouter:
         language = self._language_detector.detect(question)
         decision = self._route_once(question, language=language)
 
+        if decision.tool is ToolName.KNOWLEDGE:
+            return self._knowledge_fallback(
+                question,
+                language=language,
+                fallback_query=decision.retrieval_query,
+            )
+
         if self._tool_is_sufficient(question, decision):
             return decision
 
+        if not self._knowledge_required(question, decision):
+            LOGGER.info(
+                "natlas_tool_escalation_rejected selected_tool=%s language=%s",
+                decision.tool.value,
+                language.value,
+            )
+            return decision
+
         LOGGER.info(
-            "natlas_tool_escalation selected_tool=%s language=%s",
+            "natlas_tool_escalation_confirmed selected_tool=%s language=%s",
             decision.tool.value,
             language.value,
         )
         return self._knowledge_fallback(question, language=language)
+
+
+def _normalize_excerpt(text: str) -> str:
+    return " ".join(text.split()).casefold()
 
 
 class NatlasEvidenceVerifier:
@@ -612,12 +689,26 @@ class NatlasEvidenceVerifier:
         self._client = client
 
     @staticmethod
-    def _parse(raw: str) -> bool:
+    def _parse(raw: str, *, evidence: str) -> bool:
         payload = _json_object(raw)
         supported = payload.get("supported")
-        if not isinstance(supported, bool):
-            raise InvalidModelOutputError("N-ATLaS evidence verdict must contain a boolean.")
-        return supported
+        quote = payload.get("quote", "")
+
+        if not isinstance(supported, bool) or not isinstance(quote, str):
+            raise InvalidModelOutputError(
+                "N-ATLaS evidence verdict must contain supported and quote fields."
+            )
+
+        if not supported:
+            return False
+
+        normalized_quote = _normalize_excerpt(quote)
+        normalized_evidence = _normalize_excerpt(evidence)
+        if not normalized_quote or normalized_quote not in normalized_evidence:
+            raise InvalidModelOutputError(
+                "A supported evidence verdict must include an exact excerpt from the passage."
+            )
+        return True
 
     def is_supported(self, *, question: str, evidence: str) -> bool:
         messages = [
@@ -627,10 +718,10 @@ class NatlasEvidenceVerifier:
                 "content": f"Question:\n{question}\n\nOfficial evidence:\n{evidence}",
             },
         ]
-        raw = self._client.generate(messages, max_new_tokens=40)
+        raw = self._client.generate(messages, max_new_tokens=100)
 
         try:
-            return self._parse(raw)
+            return self._parse(raw, evidence=evidence)
         except InvalidModelOutputError as first_error:
             LOGGER.warning("natlas_invalid_evidence_verdict raw=%r", raw[:1000])
             retry = self._client.generate(
@@ -640,15 +731,16 @@ class NatlasEvidenceVerifier:
                     {
                         "role": "user",
                         "content": (
-                            "The previous verdict was invalid. Return only "
-                            '{"supported":true} or {"supported":false}.'
+                            "The previous verdict was invalid. Return only the required JSON. "
+                            "If supported is true, copy an exact supporting excerpt from the "
+                            "official evidence into quote; otherwise use an empty quote."
                         ),
                     },
                 ],
-                max_new_tokens=40,
+                max_new_tokens=100,
             )
             try:
-                return self._parse(retry)
+                return self._parse(retry, evidence=evidence)
             except InvalidModelOutputError as retry_error:
                 LOGGER.warning("natlas_invalid_evidence_retry raw=%r", retry[:1000])
                 raise retry_error from first_error
