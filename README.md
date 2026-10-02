@@ -10,22 +10,22 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 
 ```mermaid
 flowchart LR
-    A[User text] --> B[N-ATLaS language stage]
-    B --> C[N-ATLaS direct semantic router]
-    C --> D{Selected tool}
-    D -->|knowledge| G[search_ncair_knowledge_base]
-    D -->|portal or step| E[N-ATLaS tool-sufficiency check]
-    E -->|sufficient| F[execute selected portal or step tool]
-    E -->|insufficient| Q[N-ATLaS English retrieval query]
-    Q --> G
-    G --> H[FAISS / official NCAIR sources]
-    H --> I[N-ATLaS strongest-passage evidence check]
-    F --> J[N-ATLaS grounded response]
-    I --> J
-    J --> K[Answer in user's language]
+    A[User text] --> B[N-ATLaS 4-way language classifier]
+    B --> C[N-ATLaS 13-way closed-set route classifier]
+    C --> D{Deterministic route mapping}
+    D -->|portal| E[get_portal_link]
+    D -->|step| F[get_step_guidance]
+    D -->|knowledge| G[Multilingual E5 + FAISS]
+    G --> H[BGE multilingual reranker]
+    H --> I{Calibrated support threshold}
+    I -->|supported| J[N-ATLaS grounded answer]
+    I -->|unsupported| K[Safe abstention]
+    E --> J
+    F --> J
+    J --> L[Answer in user's language]
 ```
 
-V2 keeps N-ATLaS as the assessed model while preserving the direct semantic router that performed best on explicit navigation and numbered-step requests. When that router selects a portal link or numbered step, a separate N-ATLaS sufficiency check asks whether executing that exact action would actually satisfy the user's requested outcome. If not, the request is escalated to knowledge search and N-ATLaS writes a concise English retrieval query for FAISS. Knowledge decisions skip the sufficiency check. Retrieved passages are not treated as support merely because similarity search returned them: N-ATLaS verifies the strongest passage before a grounded response is generated. No benchmark phrases or keyword rules are added to the runtime router. The sufficiency check is conditional, so requests routed directly to knowledge do not pay for an extra decision stage.
+V2 treats language and routing as closed-set classification instead of free-form tool generation. N-ATLaS scores only allowed choices: four language classes and thirteen mutually exclusive route classes. Route labels map deterministically to portal actions, step numbers, or knowledge search, so invalid JSON and argument drift are eliminated. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by calibrated reranker score/margin thresholds rather than a second generative evidence judge. N-ATLaS is used again only to verbalize verified evidence in the user's language.
 
 ### V1 — comparison baseline
 
@@ -105,7 +105,7 @@ Raw command:
 NCAIR_DEFAULT_VERSION=v2 uvicorn ncair_lms.api:app --reload
 ```
 
-The first V2 request loads `NCAIR1/N-ATLaS`. Model loading is intentionally lazy so linting, unit tests, benchmark validation, and API import do not download the model.
+The first V2 request loads `NCAIR1/N-ATLaS`. The first V2 knowledge request also loads multilingual E5 and the BGE reranker. All model loading is lazy so linting, unit tests, benchmark validation, and API import do not download model weights.
 
 Endpoints:
 
@@ -191,7 +191,7 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 ```text
 .
-├── data/                         # official NCAIR source material
+├── data/                         # official NCAIR sources + atomic retrieval facts
 ├── eval/                         # held-out benchmark + evaluation code
 ├── src/
 │   └── ncair_lms/
@@ -214,11 +214,11 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 | Concern | V1 | V2 |
 | --- | --- | --- |
-| Router | keyword/sub-string rules | N-ATLaS semantic structured routing |
+| Router | keyword/sub-string rules | N-ATLaS closed-set route classification |
 | Languages | English-oriented baseline | English, Hausa, Yoruba, Igbo |
 | Tools | same three concepts | same three canonical tools |
-| Knowledge | FAISS official evidence | FAISS official evidence |
-| Knowledge query | original user text | English normalized query |
+| Knowledge | chunked FAISS official evidence | atomic multilingual FAISS + BGE reranking |
+| Knowledge query | original user text | original multilingual user text |
 | Answer model | local Ollama | N-ATLaS |
 | Evaluation purpose | baseline | assessed implementation |
 
@@ -246,6 +246,6 @@ The Python V2 is the source of truth for assignment evaluation.
 
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
-- FAISS uses an English embedding model, so V2 deliberately asks N-ATLaS for an English retrieval query before search.
-- V2 uses separate N-ATLaS calls for language classification, direct semantic routing, conditional tool sufficiency, evidence sufficiency, and grounded answering; factual questions initially mistaken for navigation may require one additional retrieval-query generation.
+- V1 still uses the original English MiniLM chunk index. V2 uses `intfloat/multilingual-e5-base` with the required query/passage prefixes, then `BAAI/bge-reranker-v2-m3` for multilingual reranking.
+- V2 route and language decisions are fixed-choice likelihood comparisons rather than generated JSON. Knowledge support is a calibrated reranker decision; `RERANK_MIN_SCORE` and `RERANK_MIN_MARGIN` should be calibrated on development data and frozen before final evaluation.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
