@@ -30,9 +30,17 @@ def _argument_correct(record: dict, actual: dict) -> bool:
     return actual == expected
 
 
-def run(version: str, mode: str) -> dict:
-    records = load_records()
-    validate_records(records)
+def run(
+    version: str,
+    mode: str,
+    *,
+    records: list[dict] | None = None,
+    result_label: str | None = None,
+) -> dict:
+    if records is None:
+        records = load_records()
+        validate_records(records)
+
     service = AssistantService(version)
     results = []
 
@@ -88,7 +96,10 @@ def run(version: str, mode: str) -> dict:
     }
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    path = RESULTS_DIR / f"{version}-{mode}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    label = f"-{result_label}" if result_label else ""
+    path = RESULTS_DIR / (
+        f"{version}-{mode}{label}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    )
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"path": str(path), "metrics": payload["metrics"]}
 
