@@ -14,6 +14,7 @@ class FakeKnowledgeBase:
         del query, top_k
         return RetrievedEvidence(
             (
+                EvidencePassage(source="first.txt", text="Related but insufficient information."),
                 EvidencePassage(source="guide.txt", text="Attendance requires 75%."),
                 EvidencePassage(source="other.txt", text="Unrelated onboarding information."),
             )
@@ -43,8 +44,8 @@ class FakeAnswerer:
 
 
 class FakeVerifier:
-    def __init__(self, supported=True):
-        self.supported = supported
+    def __init__(self, verdicts):
+        self.verdicts = list(verdicts)
         self.calls = 0
         self.questions = []
         self.evidence = []
@@ -55,7 +56,9 @@ class FakeVerifier:
         self.evidence.append(evidence)
         assert question
         assert evidence
-        return self.supported
+        if not self.verdicts:
+            raise AssertionError("FakeVerifier has no verdict left.")
+        return self.verdicts.pop(0)
 
 
 def _settings(tmp_path):
@@ -73,9 +76,9 @@ def _settings(tmp_path):
     )
 
 
-def test_v2_service_keeps_language_and_grounding(tmp_path):
+def test_v2_service_accepts_support_from_later_retrieved_passage(tmp_path):
     answerer = FakeAnswerer()
-    verifier = FakeVerifier(supported=True)
+    verifier = FakeVerifier([False, True])
     service = AssistantService(
         "v2",
         settings=_settings(tmp_path),
@@ -89,17 +92,39 @@ def test_v2_service_keeps_language_and_grounding(tmp_path):
 
     assert response.language is Language.HAUSA
     assert response.tool is ToolName.KNOWLEDGE
-    assert response.sources == ("guide.txt", "other.txt")
+    assert response.sources == ("first.txt", "guide.txt", "other.txt")
     assert "75%" in response.answer
-    assert verifier.calls == 1
-    assert verifier.questions == ["attendance requirement"]
-    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
+    assert verifier.calls == 2
+    assert verifier.questions == ["attendance requirement", "attendance requirement"]
+    assert verifier.evidence == [
+        "[first.txt]\nRelated but insufficient information.",
+        "[guide.txt]\nAttendance requires 75%.",
+    ]
     assert answerer.calls == 1
 
 
-def test_v2_service_rejects_retrieval_that_does_not_answer_question(tmp_path):
+def test_v2_service_stops_verifying_after_first_supported_passage(tmp_path):
     answerer = FakeAnswerer()
-    verifier = FakeVerifier(supported=False)
+    verifier = FakeVerifier([True])
+    service = AssistantService(
+        "v2",
+        settings=_settings(tmp_path),
+        knowledge_base=FakeKnowledgeBase(),
+        router=FakeRouter(),
+        answerer=answerer,
+        verifier=verifier,
+    )
+
+    service.chat("Attendance nawa nake bukata?")
+
+    assert verifier.calls == 1
+    assert verifier.evidence == ["[first.txt]\nRelated but insufficient information."]
+    assert answerer.calls == 1
+
+
+def test_v2_service_rejects_when_no_retrieved_passage_answers_question(tmp_path):
+    answerer = FakeAnswerer()
+    verifier = FakeVerifier([False, False, False])
     service = AssistantService(
         "v2",
         settings=_settings(tmp_path),
@@ -115,7 +140,10 @@ def test_v2_service_rejects_retrieval_that_does_not_answer_question(tmp_path):
     assert response.tool is ToolName.KNOWLEDGE
     assert response.sources == ()
     assert "Ban sami isasshen bayani" in response.answer
-    assert verifier.calls == 1
-    assert verifier.questions == ["attendance requirement"]
-    assert verifier.evidence == ["[guide.txt]\nAttendance requires 75%."]
+    assert verifier.calls == 3
+    assert verifier.questions == [
+        "attendance requirement",
+        "attendance requirement",
+        "attendance requirement",
+    ]
     assert answerer.calls == 0
