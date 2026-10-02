@@ -62,7 +62,7 @@ def test_distinctive_orthography_can_reconcile_language(question, expected):
 
 
 def test_orthographic_hint_ignores_non_distinctive_shared_characters():
-    assert _orthographic_language_hint("Ọ bụ gị?") is None
+    assert _orthographic_language_hint("Ọ nọ?") is None
 
 
 def test_router_maps_navigation_to_canonical_portal_action():
