@@ -170,9 +170,7 @@ def test_evidence_verifier_accepts_exact_supported_quote():
     )
     verifier = NatlasEvidenceVerifier(client)
 
-    assert (
-        verifier.is_supported(question="What attendance is required?", evidence=evidence) is True
-    )
+    assert verifier.is_supported(question="What attendance is required?", evidence=evidence) is True
 
 
 def test_evidence_verifier_accepts_exact_contradiction_quote():
@@ -214,10 +212,13 @@ def test_evidence_verifier_rejects_hallucinated_quote_after_retry():
     )
     verifier = NatlasEvidenceVerifier(client)
 
-    assert verifier.is_supported(
-        question="What stipend is paid?",
-        evidence="Attendance must be at least 75%.",
-    ) is False
+    assert (
+        verifier.is_supported(
+            question="What stipend is paid?",
+            evidence="Attendance must be at least 75%.",
+        )
+        is False
+    )
     assert len(client.generate_calls) == 2
 
 
