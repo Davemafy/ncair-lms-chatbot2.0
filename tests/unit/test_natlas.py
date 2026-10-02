@@ -123,17 +123,43 @@ def test_router_canonicalizes_explicit_navigation_even_if_model_misroutes():
     assert decision.action is PortalAction.COURSES
 
 
-def test_router_rejects_specialized_tool_without_contract_precondition():
+def test_router_uses_model_step_when_fast_path_does_not_match():
     client = FakeClient(
-        '{"language":"english"}',
-        '{"tool":"get_portal_link"}',
+        '{"tool":"get_step_guidance"}',
+        '{"step":2}',
     )
     router = NatlasRouter(client)
 
-    decision = router.route("What are the registration requirements?")
+    decision = router.route("What happens at the second onboarding stage?")
+
+    assert decision.tool is ToolName.STEP_GUIDANCE
+    assert decision.step == 2
+
+
+def test_router_uses_model_portal_when_fast_path_does_not_match():
+    client = FakeClient(
+        '{"tool":"get_portal_link"}',
+        '{"action":"login"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("I need somewhere to enter my credentials.")
+
+    assert decision.tool is ToolName.PORTAL_LINK
+    assert decision.action is PortalAction.LOGIN
+
+
+def test_router_keeps_factual_request_as_knowledge_when_model_selects_knowledge():
+    client = FakeClient(
+        '{"tool":"search_ncair_knowledge_base"}',
+    )
+    router = NatlasRouter(client)
+
+    question = "What are the registration requirements?"
+    decision = router.route(question)
 
     assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "What are the registration requirements?"
+    assert decision.retrieval_query == question
 
 
 def test_router_keeps_original_multilingual_question_for_knowledge():
