@@ -201,9 +201,7 @@ def _support_from_scores(scores: list[float], *, min_score: float, min_margin: f
         return False
     if scores[0] < min_score:
         return False
-    if len(scores) > 1 and scores[0] - scores[1] < min_margin:
-        return False
-    return True
+    return not (len(scores) > 1 and scores[0] - scores[1] < min_margin)
 
 
 class AtomicKnowledgeBase:
@@ -380,7 +378,9 @@ class AtomicKnowledgeBase:
             )
             candidate_count = min(self._candidate_k, len(self._facts))
             _, indexes = self._index.search(vector, candidate_count)
-            candidate_indexes = [int(index) for index in indexes[0] if 0 <= index < len(self._facts)]
+            candidate_indexes = [
+                int(index) for index in indexes[0] if 0 <= index < len(self._facts)
+            ]
         except Exception as exc:
             raise RetrievalError("V2 multilingual FAISS retrieval failed.") from exc
 
