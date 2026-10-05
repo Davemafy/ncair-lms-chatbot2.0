@@ -49,6 +49,12 @@ class Settings:
     default_version: str
     natlas_quantization: str = "none"
     embedding_device: str = "cpu"
+    v2_embedding_model: str = "intfloat/multilingual-e5-base"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_device: str = "cpu"
+    rerank_candidates: int = 64
+    rerank_min_score: float = 0.0
+    rerank_min_margin: float = 0.0
     allowed_origins: tuple[str, ...] = ()
 
     @classmethod
@@ -76,6 +82,14 @@ class Settings:
             ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2:3b").strip(),
             default_version=default_version,
             embedding_device=os.getenv("EMBEDDING_DEVICE", "cpu").strip(),
+            v2_embedding_model=os.getenv(
+                "V2_EMBEDDING_MODEL", "intfloat/multilingual-e5-base"
+            ).strip(),
+            reranker_model=os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip(),
+            reranker_device=os.getenv("RERANKER_DEVICE", "cpu").strip(),
+            rerank_candidates=_positive_int("RERANK_CANDIDATES", 64),
+            rerank_min_score=_unit_interval_float("RERANK_MIN_SCORE", 0.0),
+            rerank_min_margin=_unit_interval_float("RERANK_MIN_MARGIN", 0.0),
             allowed_origins=tuple(
                 origin.strip()
                 for origin in os.getenv(
