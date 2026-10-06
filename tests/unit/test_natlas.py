@@ -3,276 +3,248 @@ import pytest
 from ncair_lms.errors import InvalidModelOutputError
 from ncair_lms.models import Language, PortalAction, ToolName
 from ncair_lms.natlas import (
-    KNOWLEDGE_QUERY_SYSTEM_PROMPT,
-    LANGUAGE_SYSTEM_PROMPT,
-    TOOL_ROUTER_SYSTEM_PROMPT,
-    TOOL_SUFFICIENCY_SYSTEM_PROMPT,
     NatlasEvidenceVerifier,
     NatlasLanguageDetector,
     NatlasRouter,
+    _explicit_portal_action,
+    _explicit_step,
+    _has_navigation_intent,
+    _language_hint,
 )
 
 
 class FakeClient:
-    def __init__(self, *outputs):
-        self.outputs = list(outputs)
-        self.calls = []
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.generate_calls = []
 
     def generate(self, messages, *, max_new_tokens):
-        self.calls.append((messages, max_new_tokens))
-        if not self.outputs:
-            raise AssertionError("FakeClient has no output left.")
-        return self.outputs.pop(0)
+        self.generate_calls.append((messages, max_new_tokens))
+        if not self.responses:
+            raise AssertionError("FakeClient has no response left.")
+        return self.responses.pop(0)
 
 
-def test_language_detector_uses_its_own_model_stage():
-    client = FakeClient('{"language":"igbo"}')
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Where can I open the LMS?", Language.ENGLISH),
+        ("Ina zan shiga LMS dina?", Language.HAUSA),
+        ("Ṣí ojú ìwé LMS fún mi.", Language.YORUBA),
+        ("Gịnị ka m ga-eme ugbu a?", Language.IGBO),
+    ],
+)
+def test_language_hint_uses_general_language_signals(question, expected):
+    language, margin = _language_hint(question)
+    assert language is expected
+    assert margin > 0
+
+
+def test_language_detector_uses_model_when_hint_is_ambiguous():
+    client = FakeClient('{"language":"english"}')
     detector = NatlasLanguageDetector(client)
 
-    language = detector.detect("Biko nyere m aka.")
-
-    assert language is Language.IGBO
-    assert len(client.calls) == 1
-    assert client.calls[0][0][0]["content"] == LANGUAGE_SYSTEM_PROMPT
+    assert detector.detect("Explain step 4 to me.") is Language.ENGLISH
+    assert len(client.generate_calls) == 1
 
 
-def test_language_detector_retries_invalid_schema_once():
-    client = FakeClient('{"language":"unknown"}', '{"language":"yoruba"}')
+def test_language_detector_reconciles_model_with_clear_lexical_signal():
+    client = FakeClient('{"language":"english"}')
     detector = NatlasLanguageDetector(client)
 
-    assert detector.detect("Jọwọ ran mi lọwọ.") is Language.YORUBA
-    assert len(client.calls) == 2
+    assert detector.detect("Wane irin abu nake bukata?") is Language.HAUSA
 
 
-def test_natlas_router_keeps_sufficient_navigation_decision():
-    client = FakeClient(
-        '{"language":"hausa"}',
-        '{"tool":"get_portal_link","arguments":{"action":"login"}}',
-        '{"sufficient":true}',
-    )
-    router = NatlasRouter(client)
+def test_language_detector_rejects_unknown_model_label():
+    client = FakeClient('{"language":"swahili"}', '{"language":"swahili"}')
+    detector = NatlasLanguageDetector(client)
 
-    decision = router.route("Don Allah nuna min wurin shiga.")
-
-    assert decision.language is Language.HAUSA
-    assert decision.tool is ToolName.PORTAL_LINK
-    assert decision.action is PortalAction.LOGIN
-    assert len(client.calls) == 3
-    assert client.calls[1][0][0]["content"] == TOOL_ROUTER_SYSTEM_PROMPT
-    assert client.calls[2][0][0]["content"] == TOOL_SUFFICIENCY_SYSTEM_PROMPT
+    with pytest.raises(InvalidModelOutputError):
+        detector.detect("neutral")
 
 
-def test_natlas_router_escalates_insufficient_navigation_to_knowledge():
-    client = FakeClient(
-        '{"language":"english"}',
-        '{"tool":"get_portal_link","arguments":{"action":"courses"}}',
-        '{"sufficient":false}',
-        '{"query":"official course progression"}',
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Explain the official course progression.")
-
-    assert decision.language is Language.ENGLISH
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "official course progression"
-    assert len(client.calls) == 4
-    assert client.calls[3][0][0]["content"] == KNOWLEDGE_QUERY_SYSTEM_PROMPT
+@pytest.mark.parametrize(
+    ("question", "step"),
+    [
+        ("Show onboarding step 1.", 1),
+        ("Me zan yi a mataki na 2?", 2),
+        ("Ṣàlàyé ìgbésẹ̀ 3.", 3),
+        ("Kọwaa step 4.", 4),
+    ],
+)
+def test_explicit_step_extraction_is_structural(question, step):
+    assert _explicit_step(question) == step
 
 
-def test_natlas_router_escalates_insufficient_step_to_knowledge():
-    client = FakeClient(
-        '{"language":"english"}',
-        '{"get_step_guidance":{"step":1}}',
-        '{"sufficient":false}',
-        '{"query":"attendance requirements for passing a cohort"}',
-    )
-    router = NatlasRouter(client)
+@pytest.mark.parametrize(
+    ("question", "action"),
+    [
+        ("Open the LMS sign in page.", PortalAction.LOGIN),
+        ("Buɗe min shafin zaɓen track.", PortalAction.TRACK_SELECTION),
+        ("Ṣí ojú ìwé profile fún mi.", PortalAction.PROFILE),
+        ("Meghee peeji ndebanye aha LMS.", PortalAction.REGISTER),
+        ("Open NCAIR's official website.", PortalAction.NCAIR_HOME),
+        ("Visit the official website of NCAIR.", PortalAction.NCAIR_HOME),
+    ],
+)
+def test_portal_resolution_uses_destination_vocabulary(question, action):
+    assert _has_navigation_intent(question)
+    assert _explicit_portal_action(question) is action
 
-    decision = router.route("What attendance do I need to pass?")
 
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "attendance requirements for passing a cohort"
+def test_factual_login_question_is_not_navigation_intent():
+    question = "Which credentials should a returning intern use to sign in?"
+    assert not _has_navigation_intent(question)
 
 
-def test_natlas_router_keeps_explicit_step_when_sufficient():
+def test_router_canonicalizes_explicit_step_even_if_model_misroutes():
     client = FakeClient(
         '{"language":"english"}',
-        '{"get_step_guidance":{"step":2}}',
-        '{"sufficient":true}',
+        '{"tool":"get_portal_link"}',
     )
     router = NatlasRouter(client)
 
-    decision = router.route("Show me onboarding step 2.")
+    decision = router.route("Explain step 3 to me.")
 
     assert decision.tool is ToolName.STEP_GUIDANCE
-    assert decision.step == 2
+    assert decision.step == 3
 
 
-def test_natlas_router_does_not_recheck_knowledge_tool():
-    client = FakeClient(
-        '{"language":"yoruba"}',
-        '{"action":"search_ncair_knowledge_base","query":"course eligibility rules"}',
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Mo fẹ mọ ofin yiyan course.")
-
-    assert decision.language is Language.YORUBA
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "course eligibility rules"
-    assert len(client.calls) == 2
-
-
-def test_natlas_router_accepts_knowledge_tool_name_as_top_level_key():
+def test_router_canonicalizes_explicit_navigation_even_if_model_misroutes():
     client = FakeClient(
         '{"language":"english"}',
-        '{"search_ncair_knowledge_base":{"query":"attendance requirement"}}',
+        '{"tool":"search_ncair_knowledge_base"}',
     )
     router = NatlasRouter(client)
 
-    decision = router.route("What attendance do I need?")
-
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "attendance requirement"
-
-
-def test_natlas_router_accepts_portal_action_shorthand():
-    client = FakeClient(
-        '{"language":"english"}',
-        '{"action":"courses"}',
-        '{"sufficient":true}',
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Open my courses page.")
+    decision = router.route("Open the courses page for me.")
 
     assert decision.tool is ToolName.PORTAL_LINK
     assert decision.action is PortalAction.COURSES
 
 
-def test_natlas_router_retries_invalid_portal_action_then_checks_sufficiency():
+def test_router_rejects_specialized_tool_without_contract_precondition():
     client = FakeClient(
         '{"language":"english"}',
-        '{"tool":"get_portal_link","arguments":{"action":"dashboard_home"}}',
-        '{"tool":"get_portal_link","arguments":{"action":"main"}}',
-        '{"sufficient":true}',
+        '{"tool":"get_portal_link"}',
     )
     router = NatlasRouter(client)
 
-    decision = router.route("Take me to the LMS home page.")
+    decision = router.route("What are the registration requirements?")
 
-    assert decision.action is PortalAction.MAIN
-    assert len(client.calls) == 4
-    retry_prompt = client.calls[2][0][-1]["content"]
-    assert "exact allowed enum values" in retry_prompt
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == "What are the registration requirements?"
 
 
-def test_natlas_router_retries_invalid_sufficiency_verdict_once():
+def test_router_keeps_original_multilingual_question_for_knowledge():
     client = FakeClient(
-        '{"language":"english"}',
-        '{"action":"profile"}',
+        '{"language":"igbo"}',
+        '{"tool":"search_ncair_knowledge_base"}',
+    )
+    router = NatlasRouter(client)
+
+    question = "Kedu iwu maka password LMS?"
+    decision = router.route(question)
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert decision.retrieval_query == question
+
+
+def test_router_retries_invalid_tool_json():
+    client = FakeClient(
+        '{"tool":"not_real"}',
+        '{"tool":"search_ncair_knowledge_base"}',
+    )
+    router = NatlasRouter(client)
+
+    decision = router.route("What is the attendance rule?")
+
+    assert decision.tool is ToolName.KNOWLEDGE
+    assert len(client.generate_calls) == 2
+
+
+def test_evidence_verifier_accepts_supported_passage_index():
+    evidence = (
+        "[ncair_knowledge_base.txt]\nAttendance Threshold: A minimum of 75% attendance is required."
+    )
+    client = FakeClient('{"verdict":"supported","passage_index":1}')
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(question="What attendance is required?", evidence=evidence) is True
+
+
+def test_evidence_verifier_accepts_contradicted_passage_index():
+    evidence = (
+        "[ncair_knowledge_base.txt]\n"
+        "Returning interns do NOT need to onboard again. "
+        "They should use their existing email and password."
+    )
+    client = FakeClient('{"verdict":"contradicted","passage_index":1}')
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert (
+        verifier.is_supported(
+            question="Returning interns must onboard again, right?",
+            evidence=evidence,
+        )
+        is True
+    )
+
+
+def test_evidence_verifier_rejects_not_found_with_null_index():
+    client = FakeClient('{"verdict":"not_found","passage_index":null}')
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert (
+        verifier.is_supported(
+            question="What stipend is paid?",
+            evidence="[ncair_knowledge_base.txt]\nAttendance must be at least 75%.",
+        )
+        is False
+    )
+
+
+def test_evidence_verifier_rejects_out_of_range_index_after_retry():
+    evidence = (
+        "[ncair_knowledge_base.txt]\nAttendance must be at least 75%.\n\n"
+        "---\n\n"
+        "[ncair_knowledge_base.txt]\nRegistration closes at 5:00 PM."
+    )
+    client = FakeClient(
+        '{"verdict":"supported","passage_index":7}',
+        '{"verdict":"supported","passage_index":9}',
+    )
+    verifier = NatlasEvidenceVerifier(client)
+
+    assert verifier.is_supported(question="What stipend is paid?", evidence=evidence) is False
+    assert len(client.generate_calls) == 2
+
+
+def test_evidence_verifier_retries_invalid_shape():
+    evidence = "[ncair_knowledge_base.txt]\nRegistration closes at 5:00 PM."
+    client = FakeClient(
         '{"supported":true}',
-        '{"sufficient":true}',
+        '{"verdict":"supported","passage_index":1}',
     )
-    router = NatlasRouter(client)
+    verifier = NatlasEvidenceVerifier(client)
 
-    decision = router.route("Open my profile page.")
+    assert (
+        verifier.is_supported(
+            question="When does registration close?",
+            evidence=evidence,
+        )
+        is True
+    )
+    assert len(client.generate_calls) == 2
 
-    assert decision.tool is ToolName.PORTAL_LINK
-    assert decision.action is PortalAction.PROFILE
-    assert len(client.calls) == 4
 
-
-def test_natlas_router_retries_invalid_knowledge_fallback_query_once():
+def test_evidence_verifier_rejects_not_found_with_non_null_index():
+    evidence = "[ncair_knowledge_base.txt]\nAttendance must be at least 75%."
     client = FakeClient(
-        '{"language":"english"}',
-        '{"action":"support"}',
-        '{"sufficient":false}',
-        '{"query":""}',
-        '{"query":"NCAIR support policy"}',
+        '{"verdict":"not_found","passage_index":1}',
+        '{"verdict":"not_found","passage_index":1}',
     )
-    router = NatlasRouter(client)
+    verifier = NatlasEvidenceVerifier(client)
 
-    decision = router.route("Explain the NCAIR support policy.")
-
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "NCAIR support policy"
-    assert len(client.calls) == 5
-
-
-def test_natlas_router_accepts_wrapped_knowledge_fallback_query():
-    client = FakeClient(
-        '{"language":"english"}',
-        '{"action":"support"}',
-        '{"sufficient":false}',
-        '{"search_ncair_knowledge_base":{"query":"support requirements"}}',
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Explain the support requirements.")
-
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "support requirements"
-
-
-def test_natlas_router_rejects_unknown_flat_action_after_retry():
-    client = FakeClient(
-        '{"language":"english"}',
-        '{"action":"invented_tool","query":"x"}',
-        '{"action":"still_invented","query":"x"}',
-    )
-    router = NatlasRouter(client)
-
-    with pytest.raises(InvalidModelOutputError):
-        router.route("Find this information.")
-
-
-def test_natlas_router_repairs_single_missing_closing_brace():
-    client = FakeClient(
-        '{"language":"hausa"}',
-        '{"tool":"search_ncair_knowledge_base","arguments":{"query":"NCAIR LMS account setup"}',
-    )
-    router = NatlasRouter(client)
-
-    decision = router.route("Ta yaya zan shirya asusun LMS?")
-
-    assert decision.language is Language.HAUSA
-    assert decision.tool is ToolName.KNOWLEDGE
-    assert decision.retrieval_query == "NCAIR LMS account setup"
-
-
-def test_natlas_router_still_rejects_non_truncation_json_errors():
-    client = FakeClient(
-        '{"language":"english"}',
-        '{"tool":search_ncair_knowledge_base,"arguments":{"query":"onboarding"}}',
-        '{"tool":search_ncair_knowledge_base,"arguments":{"query":"onboarding"}}',
-    )
-    router = NatlasRouter(client)
-
-    with pytest.raises(InvalidModelOutputError):
-        router.route("Explain onboarding.")
-
-
-def test_tool_sufficiency_prompt_has_no_benchmark_phrases():
-    assert "course progression" not in TOOL_SUFFICIENCY_SYSTEM_PROMPT.lower()
-    assert "attendance" not in TOOL_SUFFICIENCY_SYSTEM_PROMPT.lower()
-    assert "password" not in TOOL_SUFFICIENCY_SYSTEM_PROMPT.lower()
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ('{"supported":true}', True),
-        ('{"supported":false}', False),
-    ],
-)
-def test_evidence_verifier_returns_structured_support_verdict(raw, expected):
-    verifier = NatlasEvidenceVerifier(FakeClient(raw))
-
-    actual = verifier.is_supported(
-        question="What does the guide say?",
-        evidence="[guide.txt]\nThe guide states the relevant fact.",
-    )
-
-    assert actual is expected
+    assert verifier.is_supported(question="What stipend is paid?", evidence=evidence) is False
+    assert len(client.generate_calls) == 2

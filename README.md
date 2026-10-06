@@ -10,22 +10,22 @@ A text-only multilingual assistant for NCAIR LMS questions. V1 preserves the ori
 
 ```mermaid
 flowchart LR
-    A[User text] --> B[N-ATLaS language stage]
-    B --> C[N-ATLaS direct semantic router]
-    C --> D{Selected tool}
-    D -->|knowledge| G[search_ncair_knowledge_base]
-    D -->|portal or step| E[N-ATLaS tool-sufficiency check]
-    E -->|sufficient| F[execute selected portal or step tool]
-    E -->|insufficient| Q[N-ATLaS English retrieval query]
-    Q --> G
-    G --> H[FAISS / official NCAIR sources]
-    H --> I[N-ATLaS strongest-passage evidence check]
-    F --> J[N-ATLaS grounded response]
-    I --> J
-    J --> K[Answer in user's language]
+    A[User text] --> B[Language anchors + N-ATLaS fallback]
+    B --> C{Tool contract guard}
+    C -->|explicit page intent| D[get_portal_link]
+    C -->|explicit numbered step| E[get_step_guidance]
+    C -->|ambiguous| F[N-ATLaS 3-tool semantic router]
+    F -->|knowledge / invalid specialized precondition| G[Multilingual E5 + FAISS]
+    D --> H[N-ATLaS grounded response]
+    E --> H
+    G --> I[BGE multilingual reranker]
+    I --> J[N-ATLaS relation + exact evidence quote]
+    J -->|supported / contradicted + valid quote| H
+    J -->|not found / invalid quote| K[Safe abstention]
+    H --> L[Answer in user's language]
 ```
 
-V2 keeps N-ATLaS as the assessed model while preserving the direct semantic router that performed best on explicit navigation and numbered-step requests. When that router selects a portal link or numbered step, a separate N-ATLaS sufficiency check asks whether executing that exact action would actually satisfy the user's requested outcome. If not, the request is escalated to knowledge search and N-ATLaS writes a concise English retrieval query for FAISS. Knowledge decisions skip the sufficiency check. Retrieved passages are not treated as support merely because similarity search returned them: N-ATLaS verifies the strongest passage before a grounded response is generated. No benchmark phrases or keyword rules are added to the runtime router. The sufficiency check is conditional, so requests routed directly to knowledge do not pay for an extra decision stage.
+V2 is contract-first rather than benchmark-first. The two specialized tools have observable preconditions: numbered-step guidance requires an explicit step 1–4, while portal navigation requires an explicit navigation request plus a known destination. Those arguments are resolved deterministically from the product's supported language/domain vocabulary. Ambiguous requests still go through N-ATLaS, but a model-proposed specialized tool is accepted only when its documented precondition is present; otherwise the request safely falls back to knowledge search. Language identification uses distinctive orthography and common function-word anchors for the four supported languages, with N-ATLaS as the fallback when those signals are ambiguous. Knowledge questions keep the original multilingual wording and are embedded with multilingual E5 against a small atomic-fact index derived from the official NCAIR guide. FAISS supplies candidates and a multilingual BGE cross-encoder reranks them. Support is determined by a quote-backed N-ATLaS evidence relation check. The verifier must classify the evidence as supported, contradicted, or not found and, for the first two outcomes, copy an exact contiguous quote from the retrieved official evidence. The runtime validates that quote before allowing an answer. Reranker scores are kept for ranking and diagnostics, not as a tuned truth threshold. N-ATLaS is then used to verbalize only verified evidence in the user's language.
 
 ### V1 — comparison baseline
 
@@ -68,7 +68,7 @@ python -m pip install -e ".[runtime,dev]"
 
 ## Configuration
 
-`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` minimum retrieval similarity, and the original Ollama V1 model. `HF_TOKEN` has no default secret value and is optional for public model access.
+`.env.example` documents every runtime setting and the application loads `.env` automatically. The defaults select `NCAIR1/N-ATLaS`, `TOP_K=3`, a `0.30` V1 retrieval similarity, and the original Ollama V1 model. V2 reranker scores are used for ranking/diagnostics rather than as a tuned support cutoff; N-ATLaS verifies whether the retrieved official evidence actually answers the question. `HF_TOKEN` has no default secret value and is optional for public model access.
 
 Environment files are never committed.
 
@@ -105,7 +105,7 @@ Raw command:
 NCAIR_DEFAULT_VERSION=v2 uvicorn ncair_lms.api:app --reload
 ```
 
-The first V2 request loads `NCAIR1/N-ATLaS`. Model loading is intentionally lazy so linting, unit tests, benchmark validation, and API import do not download the model.
+The first V2 request loads `NCAIR1/N-ATLaS`. The first V2 knowledge request also loads multilingual E5 and the BGE reranker. All model loading is lazy so linting, unit tests, benchmark validation, and API import do not download model weights.
 
 Endpoints:
 
@@ -151,7 +151,7 @@ make test-integration
 
 ## Benchmark
 
-The repository contains a frozen 60-question regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. After its results have been inspected, it must not be described as a blind or held-out final evaluation set. Use it to detect regressions and measure known failure classes; use a fresh unseen set for final unbiased evaluation.
+The repository contains a frozen 60-question regression benchmark: 15 each in English, Hausa, Yoruba, and Igbo. After its results have been inspected, it must not be described as a blind or held-out final evaluation set. The additional `eval/dev_multilingual.jsonl` file contains the previously inspected 32-case multilingual set from the deterministic-guard experiment; it is also development data. Use both to diagnose known failure classes, then freeze implementation and create a fresh unseen set for final unbiased evaluation.
 
 Category totals:
 
@@ -174,6 +174,7 @@ Run routing comparisons:
 ```bash
 make benchmark-old
 make benchmark-new
+make benchmark-dev
 ```
 
 Run the full answer path when both model runtimes are available:
@@ -191,7 +192,7 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 ```text
 .
-├── data/                         # official NCAIR source material
+├── data/                         # official NCAIR sources + atomic retrieval facts
 ├── eval/                         # held-out benchmark + evaluation code
 ├── src/
 │   └── ncair_lms/
@@ -214,17 +215,17 @@ Metrics include tool accuracy, deterministic-argument accuracy, per-language rou
 
 | Concern | V1 | V2 |
 | --- | --- | --- |
-| Router | keyword/sub-string rules | N-ATLaS semantic structured routing |
+| Router | keyword/sub-string rules | contract guards + N-ATLaS 3-tool semantic fallback |
 | Languages | English-oriented baseline | English, Hausa, Yoruba, Igbo |
 | Tools | same three concepts | same three canonical tools |
-| Knowledge | FAISS official evidence | FAISS official evidence |
-| Knowledge query | original user text | English normalized query |
+| Knowledge | chunked FAISS official evidence | atomic multilingual FAISS + BGE reranking |
+| Knowledge query | original user text | original multilingual user text |
 | Answer model | local Ollama | N-ATLaS |
 | Evaluation purpose | baseline | assessed implementation |
 
 ## Evaluation methodology
 
-The benchmark is data, not prompt material. Runtime prompts contain general contracts and enum constraints, not benchmark questions or phrase-specific routing rules.
+Evaluation data is not prompt material. Runtime classification descriptions contain only the route taxonomy and general decision boundaries, not benchmark questions or phrase-specific rules.
 
 For each record the evaluator compares the selected tool, deterministic arguments, detected language, whether retrieved official evidence is sufficient, and failures. Cross-language consistency is measured only for records sharing a `semantic_key`. The frozen 60-case set is a regression suite; final reporting should use a separate unseen holdout after the implementation is frozen.
 
@@ -246,6 +247,6 @@ The Python V2 is the source of truth for assignment evaluation.
 
 - N-ATLaS is an 8B model; first-run download and inference need appropriate hardware.
 - PDF ingestion depends on system-installed Poppler and Tesseract.
-- FAISS uses an English embedding model, so V2 deliberately asks N-ATLaS for an English retrieval query before search.
-- V2 uses separate N-ATLaS calls for language classification, direct semantic routing, conditional tool sufficiency, evidence sufficiency, and grounded answering; factual questions initially mistaken for navigation may require one additional retrieval-query generation.
+- V1 still uses the original English MiniLM chunk index. V2 uses `intfloat/multilingual-e5-base` with the required query/passage prefixes, then `BAAI/bge-reranker-v2-m3` for multilingual reranking.
+- V2 specialized routes are accepted only when their product-level preconditions are explicit. N-ATLaS handles ambiguous semantic routing. Knowledge support requires a supported/contradicted relation plus an exact quote copied from retrieved official evidence; missing or malformed evidence fails closed. Reranker scores are not used as a benchmark-tuned truth threshold.
 - The current static Vercel UI points at the legacy Worker deployment; use the Python API endpoints for assessed V1/V2 evaluation.
